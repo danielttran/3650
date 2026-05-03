@@ -69,6 +69,10 @@ interface BibleDao {
     @Query("SELECT * FROM reading_lists ORDER BY list_order ASC, created_at ASC")
     fun observeActivePlaylists(): Flow<List<ListWithBooks>>
 
+    @Transaction
+    @Query("SELECT * FROM reading_lists")
+    suspend fun getAllLists(): List<ListWithBooks>
+
     @Query("SELECT * FROM reading_lists WHERE listId = :id")
     suspend fun getListById(id: Long): ReadingListEntity?
 
@@ -114,6 +118,12 @@ interface BibleDao {
 
     @Query("DELETE FROM list_books WHERE listId = :listId")
     suspend fun deleteBooksForList(listId: Long)
+
+    @Query("DELETE FROM list_books")
+    suspend fun clearAllBooks()
+
+    @Query("DELETE FROM reading_lists")
+    suspend fun clearAllLists()
 
     @Transaction
     suspend fun updateCustomList(list: ReadingListEntity, newBooks: List<String>) {

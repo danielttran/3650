@@ -78,4 +78,12 @@ class ProfileViewModel @Inject constructor(
             repository.dao.resetAllStats()
         }
     }
+
+    suspend fun exportData(): String {
+        return repository.exportProgress()
+    }
+
+    suspend fun importData(json: String): Boolean {
+        return repository.importProgress(json)
+    }
 }

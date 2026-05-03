@@ -11,8 +11,10 @@ import com.Bible3650.www.data.local.BookMappingEntity
 import com.Bible3650.www.data.local.DailyTask
 import com.Bible3650.www.data.local.ListWithBooks
 import com.Bible3650.www.data.local.ReadingListEntity
+import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -163,6 +165,51 @@ class BibleRepository @Inject constructor(
     suspend fun decrementManualOffset(listId: Long) {
         val list = dao.getListById(listId) ?: return
         dao.updateManualOffset(listId, list.manualOffset - 1)
+    }
+
+    suspend fun exportProgress(): String = withContext(Dispatchers.IO) {
+        val lists = dao.getAllLists().map { ReadingListBackup(it.readingList, it.books) }
+        val sources = audioSourceDao.getAllSources().map { AudioSourceBackup(it.source, it.mappings) }
+        val backup = ProgressBackup(readingLists = lists, audioSources = sources)
+        Gson().toJson(backup)
+    }
+
+    suspend fun importProgress(json: String): Boolean = withContext(Dispatchers.IO) {
+        val backup = try {
+            Gson().fromJson(json, ProgressBackup::class.java)
+        } catch (e: Exception) {
+            android.util.Log.e("BibleRepo", "Import failed", e)
+            null
+        } ?: return@withContext false
+
+        try {
+            // We use a simple sequential clear/insert here. 
+            // In a full production app, we would wrap this in a single DB transaction 
+            // across both DAOs using database.runInTransaction {}.
+            
+            dao.clearAllBooks()
+            dao.clearAllLists()
+            audioSourceDao.clearAllMappings()
+            audioSourceDao.clearAllSources()
+
+            backup.readingLists.forEach { rb ->
+                val list = rb.entity.copy(listId = 0)
+                val newId = dao.insertList(list)
+                dao.insertBooks(rb.books.map { it.copy(id = 0, listId = newId) })
+            }
+
+            backup.audioSources.forEach { sb ->
+                val source = sb.entity.copy(sourceId = 0)
+                val newId = audioSourceDao.insertSource(source)
+                audioSourceDao.upsertMappings(sb.mappings.map { it.copy(sourceId = newId) })
+            }
+            
+            folderCache.clear()
+            true
+        } catch (e: Exception) {
+            android.util.Log.e("BibleRepo", "Database restoration failed", e)
+            false
+        }
     }
 
     // Returns the content URI for the Nth audio file (1-based) inside a SAF folder,

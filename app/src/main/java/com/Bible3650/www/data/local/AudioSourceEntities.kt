@@ -49,6 +49,10 @@ interface AudioSourceDao {
     @Query("SELECT * FROM audio_sources ORDER BY created_at ASC")
     fun observeAllSources(): Flow<List<SourceWithMappings>>
 
+    @Transaction
+    @Query("SELECT * FROM audio_sources")
+    suspend fun getAllSources(): List<SourceWithMappings>
+
     @Query("SELECT * FROM book_mappings WHERE sourceId = (SELECT sourceId FROM audio_sources WHERE is_active = 1 LIMIT 1)")
     fun observeActiveMappings(): Flow<List<BookMappingEntity>>
 
@@ -88,4 +92,10 @@ interface AudioSourceDao {
 
     @Query("DELETE FROM book_mappings WHERE sourceId = :sourceId AND bookName = :bookName")
     suspend fun deleteMapping(sourceId: Long, bookName: String)
+
+    @Query("DELETE FROM book_mappings")
+    suspend fun clearAllMappings()
+
+    @Query("DELETE FROM audio_sources")
+    suspend fun clearAllSources()
 }

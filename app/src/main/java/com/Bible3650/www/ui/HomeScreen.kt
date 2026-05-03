@@ -131,15 +131,24 @@ private fun MiniPlayerBar(
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
     ) {
         Column {
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+            )
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                    .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "${playingTask?.title} (${playingTask?.totalChapters})",
+                        "${playingTask?.title ?: "Audio Player"} (${playingTask?.totalChapters ?: 0})",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                         maxLines = 1
@@ -187,15 +196,6 @@ private fun MiniPlayerBar(
                     )
                 }
             }
-
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(8.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-            )
         }
     }
 }
