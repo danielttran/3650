@@ -23,6 +23,7 @@ data class ReadingListEntity(
     @ColumnInfo(name = "current_absolute_day") val currentDayIndex: Int = 1,
     @ColumnInfo(name = "created_at") val createdAtTimestamp: Long = System.currentTimeMillis(),
     @ColumnInfo(name = "list_order") val listOrder: Int = 0,
+    @ColumnInfo(name = "stat_reset_offset") val statResetOffset: Int = 0,
     // FROZEN STATE: Caches the current task so mid-day list edits don't jar the UI
     @ColumnInfo(name = "active_book") val activeBook: String? = null,
     @ColumnInfo(name = "active_chapter") val activeChapter: Int? = null
@@ -74,6 +75,9 @@ interface BibleDao {
 
     @Query("UPDATE reading_lists SET list_order = :order WHERE listId = :id")
     suspend fun updateListOrder(id: Long, order: Int)
+
+    @Query("UPDATE reading_lists SET stat_reset_offset = current_absolute_day - 1")
+    suspend fun resetAllStats()
 
     @Transaction
     suspend fun createCustomList(list: ReadingListEntity, books: List<String>) {

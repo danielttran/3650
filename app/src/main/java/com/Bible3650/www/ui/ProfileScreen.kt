@@ -49,6 +49,17 @@ fun ProfileScreen(
                     fontWeight = FontWeight.ExtraBold,
                     color = MaterialTheme.colorScheme.primary
                 )
+                
+                Button(
+                    onClick = { viewModel.resetStats() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary,
+                        contentColor = MaterialTheme.colorScheme.onSecondary
+                    ),
+                    modifier = Modifier.padding(top = 8.dp)
+                ) {
+                    Text("Reset Total Stats")
+                }
             }
         }
 

@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class BookStat(
@@ -37,7 +38,7 @@ class ProfileViewModel @Inject constructor(
                     val totalChaptersInList = books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
                     
                     if (totalChaptersInList > 0) {
-                        val chaptersReadInList = listData.readingList.currentDayIndex - 1
+                        val chaptersReadInList = maxOf(0, (listData.readingList.currentDayIndex - 1) - listData.readingList.statResetOffset)
                         totalChapters += chaptersReadInList
 
                         val fullLoops = chaptersReadInList / totalChaptersInList
@@ -46,7 +47,8 @@ class ProfileViewModel @Inject constructor(
                         var chaptersPassed = 0
                         for (book in books) {
                             val bookChapterCount = BibleRegistry.getChapterCount(book.bookName)
-                            val readThisLoop = if (remainingChapters > chaptersPassed) 1 else 0
+                            // A book is completed in the partial loop only if we've passed its end point
+                            val readThisLoop = if (remainingChapters >= chaptersPassed + bookChapterCount) 1 else 0
                             
                             val currentCount = bookCounts.getOrDefault(book.bookName, 0)
                             bookCounts[book.bookName] = currentCount + fullLoops + readThisLoop
@@ -70,4 +72,10 @@ class ProfileViewModel @Inject constructor(
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ProfileUiState())
+
+    fun resetStats() {
+        viewModelScope.launch {
+            repository.dao.resetAllStats()
+        }
+    }
 }

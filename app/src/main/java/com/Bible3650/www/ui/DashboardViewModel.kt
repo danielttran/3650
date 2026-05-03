@@ -33,6 +33,8 @@ sealed interface DashboardUiState {
 sealed interface DashboardAction {
     data class CompleteTask(val listId: Long) : DashboardAction
     data class UndoComplete(val listId: Long) : DashboardAction
+    data class IncrementProgress(val listId: Long) : DashboardAction
+    data class DecrementProgress(val listId: Long) : DashboardAction
     data class PlayFrom(val taskId: String) : DashboardAction
     object PlayPause : DashboardAction
     object SkipNext : DashboardAction
@@ -101,6 +103,27 @@ class DashboardViewModel @Inject constructor(
     val currentPosition: StateFlow<Long> = audioManager.currentPosition
     val duration: StateFlow<Long> = audioManager.duration
 
+    private suspend fun syncPlayerIfPlaying(listId: Long) {
+        // taskId for day 0 is always "listId_0"
+        val currentId = currentMediaId.value
+        if (currentId == "${listId}_0") {
+            // Wait for the repository to finish the 'calculate and freeze' cycle
+            // so we don't accidentally play the old chapter or an empty URI.
+            val updatedTasks = repository.dailyTasksFlow
+                .filter { tasks ->
+                    tasks.any { it.listId == listId && it.fileUri.isNotEmpty() }
+                }
+                .first()
+
+            val startIndex = updatedTasks.indexOfFirst { it.uniqueId == currentId }
+            if (startIndex != -1) {
+                val playlist = updatedTasks.drop(startIndex) + updatedTasks.take(startIndex)
+                // Resume from start of new chapter. If it was playing, it stays playing.
+                audioManager.playTasks(playlist, 0)
+            }
+        }
+    }
+
     private suspend fun tryRestorePlayback() {
         val savedId  = audioManager.savedMediaId ?: return
         val savedPos = audioManager.savedPosition
@@ -134,6 +157,14 @@ class DashboardViewModel @Inject constructor(
             }
             is DashboardAction.UndoComplete -> viewModelScope.launch {
                 repository.revertListDay(action.listId)
+            }
+            is DashboardAction.IncrementProgress -> viewModelScope.launch {
+                repository.advanceListDay(action.listId)
+                syncPlayerIfPlaying(action.listId)
+            }
+            is DashboardAction.DecrementProgress -> viewModelScope.launch {
+                repository.revertListDay(action.listId)
+                syncPlayerIfPlaying(action.listId)
             }
             is DashboardAction.PlayFrom -> {
                 if (uiState.value !is DashboardUiState.Active) return

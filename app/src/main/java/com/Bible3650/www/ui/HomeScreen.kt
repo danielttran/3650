@@ -4,8 +4,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
@@ -57,8 +58,7 @@ fun HomeScreen(
 
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(bottom = 8.dp)
                 ) {
                     items(uiState.tasks, key = { "task_${it.id}" }) { task ->
                         ListEntryItem(
@@ -66,6 +66,12 @@ fun HomeScreen(
                             isPlaying = task.id == currentMediaId,
                             onPlayClick = {
                                 viewModel.dispatchAction(DashboardAction.PlayFrom(task.id))
+                            },
+                            onDecrement = {
+                                viewModel.dispatchAction(DashboardAction.DecrementProgress(task.listId))
+                            },
+                            onIncrement = {
+                                viewModel.dispatchAction(DashboardAction.IncrementProgress(task.listId))
                             }
                         )
                     }
@@ -175,47 +181,72 @@ private fun formatTimeRemaining(remainingMs: Long): String {
 fun ListEntryItem(
     task: TaskUiModel,
     isPlaying: Boolean,
-    onPlayClick: () -> Unit
+    onPlayClick: () -> Unit,
+    onDecrement: () -> Unit,
+    onIncrement: () -> Unit
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
             .clickable { onPlayClick() },
-        color = if (isPlaying) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
-                else MaterialTheme.colorScheme.surfaceVariant,
-        tonalElevation = 2.dp
+        color = if (isPlaying) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surface,
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = task.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    if (isPlaying) {
-                        Spacer(modifier = Modifier.width(8.dp))
+        Box {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "Now Playing",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
+                            text = task.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
+                        if (isPlaying) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "Now Playing",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    Text(
+                        text = task.subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onDecrement) {
+                        Icon(
+                            Icons.Default.ChevronLeft,
+                            contentDescription = "Previous",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    IconButton(onClick = onIncrement) {
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = "Next",
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
-                Text(
-                    text = task.subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
+
+            HorizontalDivider(
+                modifier = Modifier.align(Alignment.BottomCenter),
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            )
         }
     }
 }
