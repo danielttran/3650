@@ -21,18 +21,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
-import com.Bible3650.www.ui.DashboardViewModel
-import com.Bible3650.www.ui.HomeScreen
-import com.Bible3650.www.ui.ManageListsScreen
-import com.Bible3650.www.ui.ManageListsViewModel
-import com.Bible3650.www.ui.ProfileScreen
-import com.Bible3650.www.ui.ProfileViewModel
-import com.Bible3650.www.ui.ReviewMappingsScreen
-import com.Bible3650.www.ui.SourceManagerViewModel
+import androidx.navigation.NavType
+import androidx.navigation.compose.*
+import androidx.navigation.navArgument
+import com.Bible3650.www.ui.*
 import com.Bible3650.www.ui.theme.Bible3650Theme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -125,7 +117,10 @@ fun Bible3650App(dashboardViewModel: DashboardViewModel) {
                         )
                     }
 
-                    composable("review_mappings/{sourceId}") {
+                    composable(
+                        route = "review_mappings/{sourceId}",
+                        arguments = listOf(navArgument("sourceId") { type = NavType.LongType })
+                    ) {
                         ReviewMappingsScreen(
                             onBack = { navController.navigateUp() }
                         )

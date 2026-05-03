@@ -68,25 +68,38 @@ class ReviewMappingsViewModel @Inject constructor(
     private val dao: AudioSourceDao
 ) : ViewModel() {
 
-    private val sourceId: Long = checkNotNull(savedState["sourceId"])
+    private val sourceId: Long = run {
+        val raw = savedState.get<Any>("sourceId")
+        when (raw) {
+            is Long -> raw
+            is Int -> raw.toLong()
+            is String -> raw.toLongOrNull() ?: 0L
+            else -> raw?.toString()?.toLongOrNull() ?: 0L
+        }
+    }
 
     val uiState: StateFlow<ReviewUiState> = dao.observeAllSources()
         .map { allSources ->
-            val swm: SourceWithMappings? = allSources.firstOrNull { it.source.sourceId == sourceId }
-            if (swm == null) return@map ReviewUiState()
+            try {
+                val swm: SourceWithMappings? = allSources.firstOrNull { it.source.sourceId == sourceId }
+                if (swm == null) return@map ReviewUiState()
 
-            val mappingsByBook = swm.mappings.associateBy { it.bookName }
-            val rows = BibleRegistry.getAllBooks().map { bookName ->
-                val m = mappingsByBook[bookName]
-                MappingRowUi(
-                    bookName      = bookName,
-                    folderDocId   = m?.folderDocId,
-                    confidence    = m?.confidence ?: 0f,
-                    fileCount     = m?.fileCount  ?: 0,
-                    overrideTreeUri = m?.overrideTreeUri
-                )
+                val mappingsByBook = swm.mappings.associateBy { it.bookName }
+                val rows = BibleRegistry.getAllBooks().map { bookName ->
+                    val m = mappingsByBook[bookName]
+                    MappingRowUi(
+                        bookName      = bookName,
+                        folderDocId   = m?.folderDocId,
+                        confidence    = m?.confidence ?: 0f,
+                        fileCount     = m?.fileCount  ?: 0,
+                        overrideTreeUri = m?.overrideTreeUri
+                    )
+                }
+                ReviewUiState(source = swm.source, rows = rows)
+            } catch (e: Exception) {
+                android.util.Log.e("ReviewMappingsVM", "Error mapping sources", e)
+                ReviewUiState()
             }
-            ReviewUiState(source = swm.source, rows = rows)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ReviewUiState())
 
@@ -138,7 +151,7 @@ fun ReviewMappingsScreen(
     val folderPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
-        if (uri != null && pendingBook != null) {
+        if ((uri != null) && (pendingBook != null)) {
             context.contentResolver.takePersistableUriPermission(
                 uri,
                 android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
@@ -290,8 +303,8 @@ private fun countAudioFilesInTree(resolver: android.content.ContentResolver, tre
                 val name = cursor.getString(nameIdx) ?: ""
                 val mime = cursor.getString(mimeIdx) ?: ""
                 if (mime.startsWith("audio/") ||
-                    name.endsWith(".mp3", true) || name.endsWith(".m4a", true) ||
-                    name.endsWith(".ogg", true) || name.endsWith(".flac", true)) count++
+                    name.endsWith(".mp3", ignoreCase = true) || name.endsWith(".m4a", ignoreCase = true) ||
+                    name.endsWith(".ogg", ignoreCase = true) || name.endsWith(".flac", ignoreCase = true)) count++
             }
         }
     } catch (_: Exception) {}

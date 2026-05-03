@@ -59,15 +59,15 @@ class SourceManagerViewModel @Inject constructor(
 
                 withContext(Dispatchers.IO) {
                     val mappings = results.mapNotNull { r ->
-                        if (r.folderDocId != null) {
+                        r.folderDocId?.let { docId ->
                             BookMappingEntity(
                                 sourceId   = sourceId,
                                 bookName   = r.bookName,
-                                folderDocId = r.folderDocId,
+                                folderDocId = docId,
                                 confidence = r.confidence,
                                 fileCount  = r.fileCount
                             )
-                        } else null
+                        }
                     }
                     dao.upsertMappings(mappings)
                 }
@@ -85,14 +85,32 @@ class SourceManagerViewModel @Inject constructor(
     }
 
     fun switchSource(source: AudioSourceEntity) {
-        viewModelScope.launch { dao.switchTo(source.sourceId) }
+        viewModelScope.launch {
+            try {
+                dao.switchTo(source.sourceId)
+            } catch (e: Exception) {
+                android.util.Log.e("SourceManager", "Error switching source", e)
+            }
+        }
     }
 
     fun deleteSource(source: AudioSourceEntity) {
-        viewModelScope.launch { dao.deleteSource(source) }
+        viewModelScope.launch {
+            try {
+                dao.deleteSource(source)
+            } catch (e: Exception) {
+                android.util.Log.e("SourceManager", "Error deleting source", e)
+            }
+        }
     }
 
     fun renameSource(source: AudioSourceEntity, newName: String) {
-        viewModelScope.launch { dao.updateSource(source.copy(displayName = newName)) }
+        viewModelScope.launch {
+            try {
+                dao.updateSource(source.copy(displayName = newName))
+            } catch (e: Exception) {
+                android.util.Log.e("SourceManager", "Error renaming source", e)
+            }
+        }
     }
 }

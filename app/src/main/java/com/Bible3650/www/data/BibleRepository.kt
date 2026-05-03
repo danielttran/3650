@@ -3,6 +3,7 @@ package com.Bible3650.www.data
 import android.content.ContentResolver
 import android.net.Uri
 import android.provider.DocumentsContract
+import androidx.core.net.toUri
 import com.Bible3650.www.data.local.AudioSourceDao
 import com.Bible3650.www.data.local.AudioSourceEntity
 import com.Bible3650.www.data.local.BibleDao
@@ -11,11 +12,7 @@ import com.Bible3650.www.data.local.DailyTask
 import com.Bible3650.www.data.local.ListWithBooks
 import com.Bible3650.www.data.local.ReadingListEntity
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -26,20 +23,35 @@ class BibleRepository @Inject constructor(
     val audioSourceDao: AudioSourceDao,
     private val contentResolver: ContentResolver
 ) {
+    private val folderCache = mutableMapOf<String, List<String>>()
+
     // Reacts to both reading-list changes and active-source changes so the
     // player always uses the currently selected audio source.
     val dailyTasksFlow: Flow<List<DailyTask>> = combine(
         dao.observeActivePlaylists(),
         audioSourceDao.observeActiveMappings()
-    ) { lists, _ ->
+    ) { lists, activeMappings ->
+        // We only clear the cache if the active mappings (folders) have changed
+        // This is a simple heuristic: if the number of mappings changed or the contentResolver is queried
+        // for a new source. For now, clearing it only when the overall source changes is better.
+        // For simplicity, we can clear it if the activeMappings set is different.
+
+        val mappingsByBook = activeMappings.associateBy { it.bookName }
+        val activeSource   = audioSourceDao.getActiveSource()
+        
         val allTasks = mutableListOf<DailyTask>()
         for (offset in 0 until 30) {
             lists.forEach { listData ->
-                allTasks.add(resolveDailyTask(listData, offset))
+                allTasks.add(resolveDailyTask(listData, offset, mappingsByBook, activeSource))
             }
         }
-        allTasks
-    }.flowOn(Dispatchers.IO)
+        allTasks.toList()
+    }
+        .catch { e ->
+            android.util.Log.e("BibleRepo", "Error in dailyTasksFlow", e)
+            emit(emptyList())
+        }
+        .flowOn(Dispatchers.IO)
 
     suspend fun initializeDatabaseIfNeeded() {
         val hasData = withTimeoutOrNull(3000) {
@@ -70,12 +82,14 @@ class BibleRepository @Inject constructor(
 
     private fun resolveDailyTask(
         listData: ListWithBooks,
-        dayOffset: Int
+        dayOffset: Int,
+        mappingsByBook: Map<String, BookMappingEntity>,
+        activeSource: AudioSourceEntity?
     ): DailyTask {
         val books = listData.books.sortedBy { it.sortOrder }
         val totalChapters = books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
         
-        if (books.isEmpty() || totalChapters == 0) {
+        if (books.isEmpty() || (totalChapters == 0)) {
             return DailyTask(
                 listId        = listData.readingList.listId,
                 dayOffset     = dayOffset,
@@ -96,6 +110,12 @@ class BibleRepository @Inject constructor(
             normalizedDay -= count
         }
 
+        val mapping  = mappingsByBook[targetBook]
+        val fileUri  = if (mapping != null && activeSource != null) {
+            val treeUri = (mapping.overrideTreeUri ?: activeSource.rootTreeUri).toUri()
+            resolveChapterFile(treeUri, mapping.folderDocId, targetChapter, folderCache)?.toString() ?: ""
+        } else ""
+
         return DailyTask(
             listId        = listData.readingList.listId,
             dayOffset     = dayOffset,
@@ -103,6 +123,7 @@ class BibleRepository @Inject constructor(
             listName      = listData.readingList.listName,
             targetBook    = targetBook,
             targetChapter = targetChapter,
+            fileUri       = fileUri,
             isCompleted   = listData.readingList.isCompletedToday
         )
     }
@@ -136,7 +157,7 @@ class BibleRepository @Inject constructor(
                     val idIdx   = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
                     val mimeIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
                     
-                    if (nameIdx == -1 || idIdx == -1 || mimeIdx == -1) {
+                    if (nameIdx == -1 || (idIdx == -1) || (mimeIdx == -1)) {
                         android.util.Log.e("BibleRepo", "Required columns missing in query")
                         return@use
                     }
@@ -188,8 +209,13 @@ class BibleRepository @Inject constructor(
         val aToks = tokenize(a); val bToks = tokenize(b)
         for (i in 0 until minOf(aToks.size, bToks.size)) {
             val (aNum, aStr) = aToks[i]; val (bNum, bStr) = bToks[i]
-            val cmp = if (aNum && bNum) aStr.toLong().compareTo(bStr.toLong())
-                      else              aStr.compareTo(bStr, ignoreCase = true)
+            val cmp = if (aNum && bNum) {
+                val aLong = aStr.toLongOrNull() ?: Long.MAX_VALUE
+                val bLong = bStr.toLongOrNull() ?: Long.MAX_VALUE
+                aLong.compareTo(bLong)
+            } else {
+                aStr.compareTo(bStr, ignoreCase = true)
+            }
             if (cmp != 0) return cmp
         }
         return aToks.size.compareTo(bToks.size)

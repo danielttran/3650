@@ -22,26 +22,42 @@ class ManageListsViewModel @Inject constructor(
 
     fun deleteList(list: ReadingListEntity) {
         viewModelScope.launch {
-            repository.dao.deleteList(list)
+            try {
+                repository.dao.deleteList(list)
+            } catch (e: Exception) {
+                android.util.Log.e("ManageListsVM", "Error deleting list", e)
+            }
         }
     }
 
     fun createList(name: String, books: List<String>) {
         viewModelScope.launch {
-            repository.dao.createCustomList(ReadingListEntity(listName = name), books)
+            try {
+                repository.dao.createCustomList(ReadingListEntity(listName = name), books)
+            } catch (e: Exception) {
+                android.util.Log.e("ManageListsVM", "Error creating list", e)
+            }
         }
     }
 
     fun updateList(list: ReadingListEntity, newBooks: List<String>) {
         viewModelScope.launch {
-            repository.dao.updateCustomList(list, newBooks)
+            try {
+                repository.dao.updateCustomList(list, newBooks)
+            } catch (e: Exception) {
+                android.util.Log.e("ManageListsVM", "Error updating list", e)
+            }
         }
     }
 
     fun reorderLists(reorderedLists: List<ReadingListEntity>) {
         viewModelScope.launch {
-            reorderedLists.forEachIndexed { index, list ->
-                repository.dao.updateListOrder(list.listId, index)
+            try {
+                reorderedLists.forEachIndexed { index, list ->
+                    repository.dao.updateListOrder(list.listId, index)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ManageListsVM", "Error reordering lists", e)
             }
         }
     }

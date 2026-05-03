@@ -12,7 +12,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AudioSourceEntity::class,
         BookMappingEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -51,5 +51,35 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
         database.execSQL(
             "CREATE INDEX IF NOT EXISTS index_book_mappings_sourceId ON book_mappings(sourceId)"
         )
+    }
+}
+
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        // Room expects column order: id, listId, bookName, sort_order
+        // We create the table with the exact structure from AppDatabase_Impl
+        database.execSQL("""
+            CREATE TABLE IF NOT EXISTS `list_books_new` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, 
+                `listId` INTEGER NOT NULL, 
+                `bookName` TEXT NOT NULL, 
+                `sort_order` INTEGER NOT NULL, 
+                FOREIGN KEY(`listId`) REFERENCES `reading_lists`(`listId`) ON UPDATE CASCADE ON DELETE CASCADE 
+            )
+        """.trimIndent())
+        
+        // Copy data
+        database.execSQL("""
+            INSERT INTO list_books_new (listId, bookName, sort_order)
+            SELECT listId, bookName, sort_order FROM list_books
+        """.trimIndent())
+        
+        // Remove old table and rename new one
+        database.execSQL("DROP TABLE list_books")
+        database.execSQL("ALTER TABLE list_books_new RENAME TO list_books")
+        
+        // CREATE INDICES AFTER RENAME to ensure they are bound to the correct table name
+        database.execSQL("CREATE INDEX IF NOT EXISTS `index_list_books_listId` ON `list_books` (`listId`)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS `index_list_books_bookName` ON `list_books` (`bookName`)")
     }
 }

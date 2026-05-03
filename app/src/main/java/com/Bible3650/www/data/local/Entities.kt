@@ -29,7 +29,6 @@ data class ReadingListEntity(
 
 @Entity(
     tableName = "list_books",
-    primaryKeys = ["listId", "bookName"],
     foreignKeys = [
         ForeignKey(
             entity = ReadingListEntity::class,
@@ -45,6 +44,7 @@ data class ReadingListEntity(
     ]
 )
 data class ListBookEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val listId: Long,
     @ColumnInfo(name = "bookName") val bookName: String,
     @ColumnInfo(name = "sort_order") val sortOrder: Int
@@ -85,7 +85,7 @@ interface BibleDao {
     suspend fun createCustomList(list: ReadingListEntity, books: List<String>) {
         val insertedListId = insertList(list)
         val bookEntities = books.mapIndexed { index, bookName ->
-            ListBookEntity(insertedListId, bookName, index)
+            ListBookEntity(listId = insertedListId, bookName = bookName, sortOrder = index)
         }
         insertBooks(bookEntities)
     }
@@ -110,7 +110,7 @@ interface BibleDao {
         updateList(list)
         deleteBooksForList(list.listId)
         val bookEntities = newBooks.mapIndexed { index, bookName ->
-            ListBookEntity(list.listId, bookName, index)
+            ListBookEntity(listId = list.listId, bookName = bookName, sortOrder = index)
         }
         insertBooks(bookEntities)
     }

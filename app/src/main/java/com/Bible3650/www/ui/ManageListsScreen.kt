@@ -366,7 +366,11 @@ fun ManageListsScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(8.dp))
-                                        .clickable { selectedBooks = selectedBooks + book },
+                                        .clickable { 
+                                            if (book !in selectedBooks) {
+                                                selectedBooks = selectedBooks + book 
+                                            }
+                                        },
                                     color = MaterialTheme.colorScheme.surfaceVariant
                                 ) {
                                     Text(book, modifier = Modifier.padding(16.dp))

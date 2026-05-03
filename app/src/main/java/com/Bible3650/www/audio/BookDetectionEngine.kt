@@ -38,12 +38,12 @@ class BookDetectionEngine @Inject constructor(
         "Joshua"           to listOf("joshua", "josh", "jos"),
         "Judges"           to listOf("judges", "judg", "jdg"),
         "Ruth"             to listOf("ruth"),
-        "1 Samuel"         to listOf("1 samuel", "1samuel", "1 sam", "1sam"),
-        "2 Samuel"         to listOf("2 samuel", "2samuel", "2 sam", "2sam"),
-        "1 Kings"          to listOf("1 kings", "1kings", "1 ki", "1ki", "1kin"),
-        "2 Kings"          to listOf("2 kings", "2kings", "2 ki", "2ki", "2kin"),
-        "1 Chronicles"     to listOf("1 chronicles", "1chronicles", "1 chron", "1chron", "1chr"),
-        "2 Chronicles"     to listOf("2 chronicles", "2chronicles", "2 chron", "2chron", "2chr"),
+        "1 Samuel"         to listOf("1 samuel", "1samuel", "1 sam", "1sam", "i samuel", "first samuel", "1st samuel"),
+        "2 Samuel"         to listOf("2 samuel", "2samuel", "2 sam", "2sam", "ii samuel", "second samuel", "2nd samuel"),
+        "1 Kings"          to listOf("1 kings", "1kings", "1 ki", "1ki", "1kin", "i kings", "first kings", "1st kings"),
+        "2 Kings"          to listOf("2 kings", "2kings", "2 ki", "2ki", "2kin", "ii kings", "second kings", "2nd kings"),
+        "1 Chronicles"     to listOf("1 chronicles", "1chronicles", "1 chron", "1chron", "1chr", "i chronicles", "first chronicles", "1st chronicles"),
+        "2 Chronicles"     to listOf("2 chronicles", "2chronicles", "2 chron", "2chron", "2chr", "ii chronicles", "second chronicles", "2nd chronicles"),
         "Ezra"             to listOf("ezra"),
         "Nehemiah"         to listOf("nehemiah", "neh"),
         "Esther"           to listOf("esther", "esth"),
@@ -76,25 +76,25 @@ class BookDetectionEngine @Inject constructor(
         "John"             to listOf("john", "jhn"),         // standalone; numbered below
         "Acts"             to listOf("acts"),
         "Romans"           to listOf("romans", "rom"),
-        "1 Corinthians"    to listOf("1 corinthians", "1corinthians", "1 cor", "1cor"),
-        "2 Corinthians"    to listOf("2 corinthians", "2corinthians", "2 cor", "2cor"),
+        "1 Corinthians"    to listOf("1 corinthians", "1corinthians", "1 cor", "1cor", "i corinthians", "first corinthians", "1st corinthians"),
+        "2 Corinthians"    to listOf("2 corinthians", "2corinthians", "2 cor", "2cor", "ii corinthians", "second corinthians", "2nd corinthians"),
         "Galatians"        to listOf("galatians", "gal"),
         "Ephesians"        to listOf("ephesians", "eph"),
         "Philippians"      to listOf("philippians", "phil", "php"),
         "Colossians"       to listOf("colossians", "col"),
-        "1 Thessalonians"  to listOf("1 thessalonians", "1thessalonians", "1 thess", "1thess", "1thes"),
-        "2 Thessalonians"  to listOf("2 thessalonians", "2thessalonians", "2 thess", "2thess", "2thes"),
-        "1 Timothy"        to listOf("1 timothy", "1timothy", "1 tim", "1tim"),
-        "2 Timothy"        to listOf("2 timothy", "2timothy", "2 tim", "2tim"),
+        "1 Thessalonians"  to listOf("1 thessalonians", "1thessalonians", "1 thess", "1thess", "1thes", "i thessalonians", "first thessalonians", "1st thessalonians"),
+        "2 Thessalonians"  to listOf("2 thessalonians", "2thessalonians", "2 thess", "2thess", "2thes", "ii thessalonians", "second thessalonians", "2nd thessalonians"),
+        "1 Timothy"        to listOf("1 timothy", "1timothy", "1 tim", "1tim", "i timothy", "first timothy", "1st timothy"),
+        "2 Timothy"        to listOf("2 timothy", "2timothy", "2 tim", "2tim", "ii timothy", "second timothy", "2nd timothy"),
         "Titus"            to listOf("titus"),
         "Philemon"         to listOf("philemon", "phlm"),
         "Hebrews"          to listOf("hebrews", "heb"),
         "James"            to listOf("james", "jas"),
-        "1 Peter"          to listOf("1 peter", "1peter", "1 pet", "1pet"),
-        "2 Peter"          to listOf("2 peter", "2peter", "2 pet", "2pet"),
-        "1 John"           to listOf("1 john", "1john", "1 joh", "1joh", "1jn"),
-        "2 John"           to listOf("2 john", "2john", "2 joh", "2joh", "2jn"),
-        "3 John"           to listOf("3 john", "3john", "3 joh", "3joh", "3jn"),
+        "1 Peter"          to listOf("1 peter", "1peter", "1 pet", "1pet", "i peter", "first peter", "1st peter"),
+        "2 Peter"          to listOf("2 peter", "2peter", "2 pet", "2pet", "ii peter", "second peter", "2nd peter"),
+        "1 John"           to listOf("1 john", "1john", "1 joh", "1joh", "1jn", "i john", "first john", "1st john"),
+        "2 John"           to listOf("2 john", "2john", "2 joh", "2joh", "2jn", "ii john", "second john", "2nd john"),
+        "3 John"           to listOf("3 john", "3john", "3 joh", "3joh", "3jn", "iii john", "third john", "3rd john"),
         "Jude"             to listOf("jude"),
         "Revelation"       to listOf("revelation", "revelations", "rev")
     )
@@ -146,7 +146,7 @@ class BookDetectionEngine @Inject constructor(
         val usedFolders = mutableSetOf<String>()
         val assignments = mutableMapOf<String, Candidate>()
         for (c in candidates.sortedByDescending { it.score }) {
-            if (c.folder.docId !in usedFolders && c.bookName !in assignments) {
+            if ((c.folder.docId !in usedFolders) && (c.bookName !in assignments)) {
                 assignments[c.bookName] = c
                 usedFolders.add(c.folder.docId)
             }
@@ -240,30 +240,70 @@ class BookDetectionEngine @Inject constructor(
     // ---------------------------------------------------------------------------
 
     private fun computeScore(normalizedFolder: String, bookName: String, fileCount: Int): Float {
+        // Strip common "Bible" prefixes/suffixes
+        val cleanFolder = normalizedFolder
+            .replace(Regex("\\b(kjv|esv|niv|nlt|audio|book|the|chapter|chapters)\\b"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
         val bookAliases = aliases[bookName] ?: return 0f
-        val folderNoSpaces = normalizedFolder.replace(" ", "")
+        val folderNoSpaces = cleanFolder.replace(" ", "")
 
         var bestNameScore = 0f
         // Try longest alias first so "1 corinthians" beats "cor"
         for (alias in bookAliases.sortedByDescending { it.length }) {
-            if (aliasMatches(normalizedFolder, alias)) {
+            if (aliasMatches(cleanFolder, alias)) {
                 val aliasLen = alias.replace(" ", "").length.toFloat()
                 val folderLen = folderNoSpaces.length.coerceAtLeast(1).toFloat()
                 bestNameScore = maxOf(bestNameScore, 0.4f + (aliasLen / folderLen) * 0.3f)
                 break
             }
+            
+            // Fuzzy match (Levenshtein) if direct alias match fails
+            if (cleanFolder.length >= 3 && alias.length >= 3) {
+                val distance = levenshtein(cleanFolder, alias)
+                if (distance <= 1) { // Very close match
+                    bestNameScore = maxOf(bestNameScore, 0.5f)
+                } else if (distance <= 2 && cleanFolder.length >= 6) { // Typo in longer name
+                    bestNameScore = maxOf(bestNameScore, 0.4f)
+                }
+            }
         }
+        
         if (bestNameScore == 0f) return 0f
 
         val expected = BibleRegistry.getChapterCount(bookName)
+        
+        // Supercharged chapter bonus
         val chapterBonus = when {
-            fileCount == expected           -> 0.30f
-            abs(fileCount - expected) <= 2  -> 0.15f
-            fileCount in 1..(expected + 5)  -> 0.05f
-            else                            -> 0f
+            fileCount == expected && expected > 5 -> 0.60f // Massive boost for larger books
+            fileCount == expected -> 0.40f
+            abs(fileCount - expected) <= 1 -> 0.20f
+            abs(fileCount - expected) <= 2 -> 0.10f
+            else -> 0f
+        }
+
+        // If it's a perfect unique chapter match for a large book, force high confidence
+        if (fileCount == expected && (expected == 150 || expected == 66 || expected == 50 || expected == 52)) {
+            return 0.95f
         }
 
         return (bestNameScore + chapterBonus).coerceIn(0f, 1f)
+    }
+
+    private fun levenshtein(s1: String, s2: String): Int {
+        val dp = IntArray(s2.length + 1) { it }
+        for (i in 1..s1.length) {
+            var prev = i
+            for (j in 1..s2.length) {
+                val current = if (s1[i - 1] == s2[j - 1]) dp[j - 1] 
+                              else minOf(dp[j - 1], dp[j], prev) + 1
+                dp[j - 1] = prev
+                prev = current
+            }
+            dp[s2.length] = prev
+        }
+        return dp[s2.length]
     }
 
     // Match alias against a normalised folder name with word-boundary awareness.

@@ -70,15 +70,23 @@ class DashboardViewModel @Inject constructor(
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
-            repository.initializeDatabaseIfNeeded()
-            withContext(Dispatchers.Main) {
-                tryRestorePlayback()
+            try {
+                repository.initializeDatabaseIfNeeded()
+                withContext(Dispatchers.Main) {
+                    tryRestorePlayback()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardVM", "Initialization failed", e)
             }
         }
 
         viewModelScope.launch {
             audioManager.completedTracks.collect { listId ->
-                repository.dao.advanceListDay(listId)
+                try {
+                    repository.dao.advanceListDay(listId)
+                } catch (e: Exception) {
+                    android.util.Log.e("DashboardVM", "Error advancing day", e)
+                }
             }
         }
     }
@@ -113,7 +121,7 @@ class DashboardViewModel @Inject constructor(
                 repository.dao.updateTaskStatus(action.listId, action.isChecked)
             }
             is DashboardAction.PlayFrom -> {
-                val state = uiState.value as? DashboardUiState.Active ?: return
+                if (uiState.value !is DashboardUiState.Active) return
                 viewModelScope.launch {
                     val tasks = repository.dailyTasksFlow.first()
                     val index = tasks.indexOfFirst { it.uniqueId == action.taskId }

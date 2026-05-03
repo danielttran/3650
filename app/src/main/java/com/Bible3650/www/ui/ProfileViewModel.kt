@@ -28,41 +28,46 @@ class ProfileViewModel @Inject constructor(
 
     val uiState: StateFlow<ProfileUiState> = repository.dao.observeActivePlaylists()
         .map { lists ->
-            var totalChapters = 0
-            val bookCounts = mutableMapOf<String, Int>()
+            try {
+                var totalChapters = 0
+                val bookCounts = mutableMapOf<String, Int>()
 
-            lists.forEach { listData ->
-                val books = listData.books.sortedBy { it.sortOrder }
-                val totalChaptersInList = books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
-                
-                if (totalChaptersInList > 0) {
-                    val chaptersReadInList = listData.readingList.currentDayIndex - 1
-                    totalChapters += chaptersReadInList
+                lists.forEach { listData ->
+                    val books = listData.books.sortedBy { it.sortOrder }
+                    val totalChaptersInList = books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
                     
-                    val fullLoops = chaptersReadInList / totalChaptersInList
-                    val remainingChapters = chaptersReadInList % totalChaptersInList
-                    
-                    var chaptersPassed = 0
-                    for (book in books) {
-                        val bookChapterCount = BibleRegistry.getChapterCount(book.bookName)
-                        val readThisLoop = if (remainingChapters >= chaptersPassed + bookChapterCount) 1 else 0
+                    if (totalChaptersInList > 0) {
+                        val chaptersReadInList = listData.readingList.currentDayIndex - 1
+                        totalChapters += chaptersReadInList
                         
-                        val currentCount = bookCounts.getOrDefault(book.bookName, 0)
-                        bookCounts[book.bookName] = currentCount + fullLoops + readThisLoop
+                        val fullLoops = chaptersReadInList / totalChaptersInList
+                        val remainingChapters = chaptersReadInList % totalChaptersInList
                         
-                        chaptersPassed += bookChapterCount
+                        var chaptersPassed = 0
+                        for (book in books) {
+                            val bookChapterCount = BibleRegistry.getChapterCount(book.bookName)
+                            val readThisLoop = if (remainingChapters >= chaptersPassed + bookChapterCount) 1 else 0
+                            
+                            val currentCount = bookCounts.getOrDefault(book.bookName, 0)
+                            bookCounts[book.bookName] = currentCount + fullLoops + readThisLoop
+                            
+                            chaptersPassed += bookChapterCount
+                        }
                     }
                 }
-            }
 
-            val stats = BibleRegistry.getAllBooks().map { bookName ->
-                BookStat(bookName, bookCounts.getOrDefault(bookName, 0))
-            }
+                val stats = BibleRegistry.getAllBooks().map { bookName ->
+                    BookStat(bookName, bookCounts.getOrDefault(bookName, 0))
+                }
 
-            ProfileUiState(
-                totalChaptersRead = totalChapters,
-                bookStats = stats
-            )
+                ProfileUiState(
+                    totalChaptersRead = totalChapters,
+                    bookStats = stats
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("ProfileVM", "Error calculating stats", e)
+                ProfileUiState()
+            }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ProfileUiState())
 }

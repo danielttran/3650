@@ -20,12 +20,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.net.Uri
+import androidx.core.net.toUri
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -111,6 +111,7 @@ class AudioControllerManager @Inject constructor(
                     }
                 }
 
+                @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
                 override fun onPositionDiscontinuity(
                     oldPosition: Player.PositionInfo,
                     newPosition: Player.PositionInfo,
@@ -155,7 +156,7 @@ class AudioControllerManager @Inject constructor(
                 fun resolveUri(task: DailyTask): Uri? {
                     val mapping = mappingsByBook[task.targetBook] ?: return null
                     if (activeSource == null) return null
-                    val treeUri = Uri.parse(mapping.overrideTreeUri ?: activeSource.rootTreeUri)
+                    val treeUri = (mapping.overrideTreeUri ?: activeSource.rootTreeUri).toUri()
                     return repository.resolveChapterFile(treeUri, mapping.folderDocId, task.targetChapter, folderCache)
                 }
 
@@ -165,6 +166,11 @@ class AudioControllerManager @Inject constructor(
                     val firstItem = MediaItem.Builder()
                         .setMediaId(firstTask.uniqueId)
                         .setUri(firstUri)
+                        .setRequestMetadata(
+                            MediaItem.RequestMetadata.Builder()
+                                .setMediaUri(firstUri)
+                                .build()
+                        )
                         .build()
                     player.setMediaItem(firstItem)
                     if (startPositionMs != androidx.media3.common.C.TIME_UNSET) player.seekTo(startPositionMs)
@@ -182,7 +188,16 @@ class AudioControllerManager @Inject constructor(
                 }
 
                 withContext(Dispatchers.Main) {
-                    player.setMediaItems(allMediaItems, startIndex, player.currentPosition)
+                    // Only update the playlist if we are still on the same track
+                    if (player.currentMediaItem?.mediaId == firstTask.uniqueId) {
+                        val before = allMediaItems.take(startIndex)
+                        val after = allMediaItems.drop(startIndex + 1)
+                        
+                        // Append items after current
+                        if (after.isNotEmpty()) player.addMediaItems(after)
+                        // Prepend items before current (index 0 in player right now)
+                        if (before.isNotEmpty()) player.addMediaItems(0, before)
+                    }
                 }
             } catch (e: Exception) {
                 android.util.Log.e("AudioController", "Failed to play tasks", e)
