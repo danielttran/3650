@@ -71,7 +71,16 @@ class AudioControllerManager @Inject constructor(
         val sessionToken = SessionToken(context, ComponentName(context, AudioPlaybackService::class.java))
         controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
         controllerFuture?.addListener({
-            val mediaController = controllerFuture?.get()
+            val mediaController = try {
+                controllerFuture?.get()
+            } catch (e: Exception) {
+                android.util.Log.e("AudioController", "MediaController build failed", e)
+                null
+            }
+            if (mediaController == null) {
+                android.util.Log.e("AudioController", "MediaController is null after build")
+                return@addListener
+            }
             _player.value = mediaController
 
             scope.launch {
@@ -92,7 +101,7 @@ class AudioControllerManager @Inject constructor(
                 }
             }
 
-            mediaController?.addListener(object : Player.Listener {
+            mediaController.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     _isPlaying.value = isPlaying
                     if (!isPlaying) {
@@ -154,14 +163,14 @@ class AudioControllerManager @Inject constructor(
                 val activeMappings = repository.audioSourceDao.observeActiveMappings().firstOrNull() ?: emptyList()
                 val mappingsByBook = activeMappings.associateBy { it.bookName }
                 val activeSource   = repository.audioSourceDao.getActiveSource()
-                
-                val folderCache = mutableMapOf<String, List<String>>()
 
+                // Reuse the repository's shared folder cache so we don't re-scan
+                // directories that were already scanned for dailyTasksFlow.
                 fun resolveUri(task: DailyTask): Uri? {
                     val mapping = mappingsByBook[task.targetBook] ?: return null
                     if (activeSource == null) return null
                     val treeUri = (mapping.overrideTreeUri ?: activeSource.rootTreeUri).toUri()
-                    return repository.resolveChapterFile(treeUri, mapping.folderDocId, task.targetChapter, folderCache)
+                    return repository.resolveChapterFile(treeUri, mapping.folderDocId, task.targetChapter, repository.folderCache)
                 }
 
                 val firstUri = resolveUri(firstTask)

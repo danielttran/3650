@@ -40,24 +40,27 @@ class BibleRepository @Inject constructor(
         }
     }
 
-    private val folderCache = mutableMapOf<String, List<String>>()
+    // Shared cache of folder→sorted-docIds so both dailyTasksFlow and
+    // playTasks benefit from the same one-time directory scan.
+    internal val folderCache = mutableMapOf<String, List<String>>()
 
-    // Reacts to both reading-list changes and active-source changes so the
-    // player always uses the currently selected audio source.
+    private val _requestedWindowDays = MutableStateFlow(30)
+
+    /** Expand the visible day-window by [increment] days. */
+    fun expandWindow(increment: Int = 30) {
+        _requestedWindowDays.update { it + increment }
+    }
+
     val dailyTasksFlow: Flow<List<DailyTask>> = combine(
         dao.observeActivePlaylists(),
-        audioSourceDao.observeActiveMappings()
-    ) { lists, activeMappings ->
-        // We only clear the cache if the active mappings (folders) have changed
-        // This is a simple heuristic: if the number of mappings changed or the contentResolver is queried
-        // for a new source. For now, clearing it only when the overall source changes is better.
-        // For simplicity, we can clear it if the activeMappings set is different.
-
+        audioSourceDao.observeActiveMappings(),
+        _requestedWindowDays
+    ) { lists, activeMappings, windowDays ->
         val mappingsByBook = activeMappings.associateBy { it.bookName }
         val activeSource   = audioSourceDao.getActiveSource()
-        
+
         val allTasks = mutableListOf<DailyTask>()
-        for (offset in 0 until 30) {
+        for (offset in 0 until windowDays) {
             lists.forEach { listData ->
                 allTasks.add(resolveDailyTask(listData, offset, mappingsByBook, activeSource))
             }

@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -66,7 +67,24 @@ fun HomeScreen(
                     uiState.tasks.find { it.id == currentMediaId }
                 }
 
+                val listState = rememberLazyListState()
+
+                // Trigger window expansion when the user scrolls within 20 items of the
+                // end.  derivedStateOf ensures this only fires on the true→false→true
+                // transition, not on every scroll frame.
+                val shouldLoadMore by remember {
+                    derivedStateOf {
+                        val info = listState.layoutInfo
+                        val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+                        info.totalItemsCount > 0 && lastVisible >= info.totalItemsCount - 20
+                    }
+                }
+                LaunchedEffect(shouldLoadMore) {
+                    if (shouldLoadMore) viewModel.loadMoreDays()
+                }
+
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
