@@ -2,7 +2,6 @@ package com.Bible3650.www.data
 
 import android.content.ContentResolver
 import android.content.Context
-import android.content.SharedPreferences
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.core.net.toUri
@@ -31,28 +30,15 @@ class BibleRepository @Inject constructor(
     // playTasks benefit from the same one-time directory scan.
     internal val folderCache = mutableMapOf<String, List<String>>()
 
-    private val _requestedWindowDays = MutableStateFlow(30)
-
-    /** Expand the visible day-window by [increment] days. */
-    fun expandWindow(increment: Int = 30) {
-        _requestedWindowDays.update { it + increment }
-    }
-
     val dailyTasksFlow: Flow<List<DailyTask>> = combine(
         dao.observeActivePlaylists(),
-        audioSourceDao.observeActiveMappings(),
-        _requestedWindowDays
-    ) { lists, activeMappings, windowDays ->
+        audioSourceDao.observeActiveMappings()
+    ) { lists, activeMappings ->
         val mappingsByBook = activeMappings.associateBy { it.bookName }
         val activeSource   = audioSourceDao.getActiveSource()
-
-        val allTasks = mutableListOf<DailyTask>()
-        for (offset in 0 until windowDays) {
-            lists.forEach { listData ->
-                allTasks.add(resolveDailyTask(listData, offset, mappingsByBook, activeSource))
-            }
+        lists.map { listData ->
+            resolveDailyTask(listData, 0, mappingsByBook, activeSource)
         }
-        allTasks.toList()
     }
         .catch { e ->
             android.util.Log.e("BibleRepo", "Error in dailyTasksFlow", e)

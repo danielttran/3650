@@ -1,30 +1,23 @@
 package com.Bible3650.www.ui
 
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     modifier: Modifier = Modifier,
@@ -58,66 +51,23 @@ fun HomeScreen(
                 }
             }
             is DashboardUiState.Active -> {
-                // Memoized so grouping only re-runs when the task list actually changes,
-                // not on every currentMediaId update.
-                val groupedTasks = remember(uiState.tasks) {
-                    uiState.tasks.groupBy { it.dayOffset }
-                }
                 val playingTask = remember(uiState.tasks, currentMediaId) {
                     uiState.tasks.find { it.id == currentMediaId }
                 }
 
-                val listState = rememberLazyListState()
-
-                // Trigger window expansion when the user scrolls within 20 items of the
-                // end.  derivedStateOf ensures this only fires on the true→false→true
-                // transition, not on every scroll frame.
-                val shouldLoadMore by remember {
-                    derivedStateOf {
-                        val info = listState.layoutInfo
-                        val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-                        info.totalItemsCount > 0 && lastVisible >= info.totalItemsCount - 20
-                    }
-                }
-                LaunchedEffect(shouldLoadMore) {
-                    if (shouldLoadMore) viewModel.loadMoreDays()
-                }
-
                 LazyColumn(
-                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    groupedTasks.forEach { (dayOffset, tasks) ->
-                        stickyHeader(key = "header_$dayOffset") {
-                            Surface(
-                                color = MaterialTheme.colorScheme.background.copy(alpha = 0.95f),
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = "Day ${dayOffset + 1}",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(vertical = 4.dp)
-                                )
+                    items(uiState.tasks, key = { "task_${it.id}" }) { task ->
+                        ListEntryItem(
+                            task = task,
+                            isPlaying = task.id == currentMediaId,
+                            onPlayClick = {
+                                viewModel.dispatchAction(DashboardAction.PlayFrom(task.id))
                             }
-                        }
-                        items(tasks, key = { "daySec_${dayOffset}_list_${it.listId}_task_${it.id}" }) { task ->
-                            ListEntryItem(
-                                task = task,
-                                isPlaying = task.id == currentMediaId,
-                                onPlayClick = {
-                                    viewModel.dispatchAction(DashboardAction.PlayFrom(task.id))
-                                },
-                                onComplete = {
-                                    if (task.dayOffset == 0) {
-                                        viewModel.dispatchAction(DashboardAction.CompleteTask(task.listId))
-                                    }
-                                }
-                            )
-                        }
+                        )
                     }
 
                     item { Spacer(modifier = Modifier.height(140.dp)) }
@@ -225,8 +175,7 @@ private fun formatTimeRemaining(remainingMs: Long): String {
 fun ListEntryItem(
     task: TaskUiModel,
     isPlaying: Boolean,
-    onPlayClick: () -> Unit,
-    onComplete: () -> Unit
+    onPlayClick: () -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -243,40 +192,28 @@ fun ListEntryItem(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (task.dayOffset == 0) {
-                IconButton(onClick = { onComplete() }) {
-                    Icon(
-                        imageVector = Icons.Outlined.Circle,
-                        contentDescription = "Mark as complete",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                Spacer(modifier = Modifier.width(48.dp))
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = task.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = task.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (isPlaying) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "Now Playing",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
                 Text(
                     text = task.subtitle,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            if (isPlaying) {
-                Box(
-                    modifier = Modifier
-                        .size(12.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(MaterialTheme.colorScheme.primary)
                 )
             }
         }
