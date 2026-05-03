@@ -21,6 +21,7 @@ data class TaskUiModel(
     val dayOffset: Int,
     val title: String,
     val subtitle: String,
+    val totalChapters: Int,
     val fileUri: String
 )
 
@@ -65,12 +66,13 @@ class DashboardViewModel @Inject constructor(
 
         val mappedTasks = tasks.map { task ->
             TaskUiModel(
-                id          = task.uniqueId,
-                listId      = task.listId,
-                dayOffset   = task.dayOffset,
-                title       = task.listName,
-                subtitle    = "${task.targetBook} ${task.targetChapter}",
-                fileUri     = task.fileUri
+                id            = task.uniqueId,
+                listId        = task.listId,
+                dayOffset     = task.dayOffset,
+                title         = task.listName,
+                subtitle      = "${task.targetBook} ${task.targetChapter}",
+                totalChapters = task.totalChapters,
+                fileUri       = task.fileUri
             )
         }
         DashboardUiState.Active(mappedTasks)
@@ -163,11 +165,11 @@ class DashboardViewModel @Inject constructor(
                 repository.revertListDay(action.listId)
             }
             is DashboardAction.IncrementProgress -> viewModelScope.launch {
-                repository.advanceListDay(action.listId)
+                repository.incrementManualOffset(action.listId)
                 syncPlayerIfPlaying(action.listId)
             }
             is DashboardAction.DecrementProgress -> viewModelScope.launch {
-                repository.revertListDay(action.listId)
+                repository.decrementManualOffset(action.listId)
                 syncPlayerIfPlaying(action.listId)
             }
             is DashboardAction.PlayFrom -> {

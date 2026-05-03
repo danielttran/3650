@@ -164,31 +164,37 @@ fun ReviewMappingsScreen(
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(state.source?.displayName ?: "Review Mappings",
-                             style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("${state.mappedCount} / ${state.rows.size} books mapped",
-                             style = MaterialTheme.typography.bodySmall,
-                             color = if (state.allMapped) MaterialTheme.colorScheme.primary
-                                     else MaterialTheme.colorScheme.error)
-                    }
-                },
-                navigationIcon = {
+        modifier = Modifier.fillMaxSize()
+    ) { _ ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
+                    Column {
+                        Text(
+                            state.source?.displayName ?: "Review Mappings",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "${state.mappedCount} / ${state.rows.size} books mapped",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (state.allMapped) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.error
+                        )
+                    }
                 }
-            )
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
+            }
+
             if (!state.allMapped) {
                 item {
                     Card(

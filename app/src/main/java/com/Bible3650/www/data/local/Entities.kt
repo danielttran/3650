@@ -10,6 +10,7 @@ data class DailyTask(
     val listName: String,
     val targetBook: String,
     val targetChapter: Int,
+    val totalChapters: Int = 0,
     val fileUri: String = ""
 )
 
@@ -24,6 +25,7 @@ data class ReadingListEntity(
     @ColumnInfo(name = "created_at") val createdAtTimestamp: Long = System.currentTimeMillis(),
     @ColumnInfo(name = "list_order") val listOrder: Int = 0,
     @ColumnInfo(name = "stat_reset_offset") val statResetOffset: Int = 0,
+    @ColumnInfo(name = "manual_offset") val manualOffset: Int = 0,
     // FROZEN STATE: Caches the current task so mid-day list edits don't jar the UI
     @ColumnInfo(name = "active_book") val activeBook: String? = null,
     @ColumnInfo(name = "active_chapter") val activeChapter: Int? = null
@@ -72,6 +74,9 @@ interface BibleDao {
 
     @Query("UPDATE reading_lists SET current_absolute_day = :newIndex, active_book = :newBook, active_chapter = :newChapter WHERE listId = :id")
     suspend fun updateListProgress(id: Long, newIndex: Int, newBook: String?, newChapter: Int?)
+
+    @Query("UPDATE reading_lists SET manual_offset = :newOffset, active_book = NULL, active_chapter = NULL WHERE listId = :id")
+    suspend fun updateManualOffset(id: Long, newOffset: Int)
 
     @Query("UPDATE reading_lists SET list_order = :order WHERE listId = :id")
     suspend fun updateListOrder(id: Long, order: Int)

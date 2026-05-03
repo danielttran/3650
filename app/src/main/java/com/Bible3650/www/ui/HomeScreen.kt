@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
@@ -60,6 +61,22 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 8.dp)
                 ) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "PROFESSOR GRANT HORNER BIBLE",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
                     items(uiState.tasks, key = { "task_${it.id}" }) { task ->
                         ListEntryItem(
                             task = task,
@@ -106,60 +123,79 @@ private fun MiniPlayerBar(
     val progress = if (duration > 0) (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
     val timeRemaining = remember(duration, currentPosition) { formatTimeRemaining(duration - currentPosition) }
 
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        tonalElevation = 8.dp,
+        shadowElevation = 16.dp,
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
     ) {
         Column {
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier.fillMaxWidth().height(4.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f)
-            )
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp),
+                    .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        playingTask?.title ?: "Audio Player",
+                        "${playingTask?.title} (${playingTask?.totalChapters})",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                         maxLines = 1
                     )
                     Text(
                         playingTask?.subtitle ?: "Playing...",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1
+                    )
+                }
+
+                if (duration > 0) {
+                    Text(
+                        timeRemaining,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        maxLines = 1
+                        modifier = Modifier.padding(end = 12.dp)
                     )
-                    if (duration > 0) {
-                        Text(
-                            timeRemaining,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
-                        )
-                    }
                 }
-                IconButton(onClick = { viewModel.dispatchAction(DashboardAction.PlayPause) }) {
+
+                IconButton(
+                    onClick = { viewModel.dispatchAction(DashboardAction.PlayPause) },
+                    modifier = Modifier.size(72.dp)
+                ) {
                     Icon(
-                        if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = "Play/Pause"
+                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = "Play/Pause",
+                        modifier = Modifier.size(52.dp),
+                        tint = MaterialTheme.colorScheme.onSurface
                     )
                 }
-                IconButton(onClick = { viewModel.dispatchAction(DashboardAction.SkipNext) }) {
-                    Icon(Icons.Default.SkipNext, contentDescription = "Skip")
+
+                IconButton(
+                    onClick = { viewModel.dispatchAction(DashboardAction.SkipNext) },
+                    modifier = Modifier.size(72.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SkipNext,
+                        contentDescription = "Skip",
+                        modifier = Modifier.size(52.dp),
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
                 }
             }
+
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+            )
         }
     }
 }
@@ -202,7 +238,7 @@ fun ListEntryItem(
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = task.title,
+                            text = "${task.title} (${task.totalChapters})",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface

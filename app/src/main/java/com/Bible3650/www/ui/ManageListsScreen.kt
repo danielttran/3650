@@ -88,16 +88,7 @@ fun ManageListsScreen(
 
     Scaffold(
         modifier = modifier,
-        topBar = {
-            TopAppBar(
-                title = { Text("Manage Lists") },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                }
-            )
-        },
+        floatingActionButtonPosition = FabPosition.Start,
         floatingActionButton = {
             FloatingActionButton(onClick = {
                 editingList = com.Bible3650.www.data.local.ReadingListEntity(
@@ -110,12 +101,28 @@ fun ManageListsScreen(
                 Icon(Icons.Default.Add, contentDescription = "Add Reading List")
             }
         }
-    ) { innerPadding ->
+    ) { _ ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(innerPadding),
-            contentPadding = PaddingValues(16.dp),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onBackClick) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                    Text(
+                        "Manage Lists",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
             // ----------------------------------------------------------------
             // Audio Sources section
             // ----------------------------------------------------------------

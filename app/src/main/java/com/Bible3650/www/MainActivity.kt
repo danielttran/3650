@@ -20,7 +20,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavType
@@ -96,26 +95,7 @@ fun Bible3650App(dashboardViewModel: DashboardViewModel) {
         ) {
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
-                snackbarHost = { SnackbarHost(snackbarHostState) },
-                topBar = {
-                    if (currentRoute == AppDestinations.HOME.route) {
-                        CenterAlignedTopAppBar(
-                            title = {
-                                Text("AUDIO BIBLE",
-                                     style = MaterialTheme.typography.titleMedium,
-                                     fontWeight = FontWeight.ExtraBold)
-                            },
-                            navigationIcon = {
-                                IconButton(onClick = { }) {
-                                    Icon(painterResource(R.drawable.ic_home),
-                                         contentDescription = null,
-                                         tint = MaterialTheme.colorScheme.tertiary)
-                                }
-                            },
-                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                        )
-                    }
-                }
+                snackbarHost = { SnackbarHost(snackbarHostState) }
             ) { innerPadding ->
                 NavHost(
                     navController = navController,

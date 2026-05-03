@@ -111,6 +111,8 @@ class BibleRepository @Inject constructor(
             resolveChapterFile(treeUri, mapping.folderDocId, targetChapter, folderCache)?.toString() ?: ""
         } else ""
 
+        val totalChapters = listData.books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
+
         return DailyTask(
             listId        = list.listId,
             dayOffset     = dayOffset,
@@ -118,6 +120,7 @@ class BibleRepository @Inject constructor(
             listName      = list.listName,
             targetBook    = targetBook,
             targetChapter = targetChapter,
+            totalChapters = totalChapters,
             fileUri       = fileUri
         )
     }
@@ -128,7 +131,9 @@ class BibleRepository @Inject constructor(
 
         if (books.isEmpty() || totalChapters == 0) return "Empty" to 0
 
-        var normalizedDay = ((listData.readingList.currentDayIndex + dayOffset - 1) % totalChapters) + 1
+        val absoluteDay = listData.readingList.currentDayIndex + dayOffset + listData.readingList.manualOffset
+        var normalizedDay = ((absoluteDay - 1).mod(totalChapters)) + 1
+
         for (book in books) {
             val count = BibleRegistry.getChapterCount(book.bookName)
             if (normalizedDay <= count) return book.bookName to normalizedDay
@@ -148,6 +153,16 @@ class BibleRepository @Inject constructor(
         val list = dao.getListById(listId) ?: return
         val newIndex = maxOf(1, list.currentDayIndex - 1)
         dao.updateListProgress(listId, newIndex, null, null)
+    }
+
+    suspend fun incrementManualOffset(listId: Long) {
+        val list = dao.getListById(listId) ?: return
+        dao.updateManualOffset(listId, list.manualOffset + 1)
+    }
+
+    suspend fun decrementManualOffset(listId: Long) {
+        val list = dao.getListById(listId) ?: return
+        dao.updateManualOffset(listId, list.manualOffset - 1)
     }
 
     // Returns the content URI for the Nth audio file (1-based) inside a SAF folder,
