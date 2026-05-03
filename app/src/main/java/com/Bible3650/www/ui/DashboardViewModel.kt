@@ -22,8 +22,7 @@ data class TaskUiModel(
     val title: String,
     val subtitle: String,
     val fileUri: String,
-    val isCompleted: Boolean,
-    val isPlaying: Boolean
+    val isCompleted: Boolean
 )
 
 sealed interface DashboardUiState {
@@ -45,12 +44,14 @@ class DashboardViewModel @Inject constructor(
     private val audioManager: AudioControllerManager
 ) : ViewModel() {
 
+    // currentMediaId is exposed separately so the UI can derive isPlaying per-item
+    // without triggering a full re-map of all tasks on every track transition.
+    val currentMediaId: StateFlow<String?> = audioManager.currentMediaId
+
     val uiState: StateFlow<DashboardUiState> = combine(
         repository.dailyTasksFlow,
-        audioManager.currentMediaId,
         repository.audioSourceDao.observeActiveMappings()
-    ) { tasks, playingId, activeMappings ->
-        // If there are no mappings at all, no source has been linked yet
+    ) { tasks, activeMappings ->
         if (activeMappings.isEmpty()) return@combine DashboardUiState.NoSource
 
         val mappedTasks = tasks.map { task ->
@@ -61,8 +62,7 @@ class DashboardViewModel @Inject constructor(
                 title       = task.listName,
                 subtitle    = "${task.targetBook} ${task.targetChapter}",
                 fileUri     = task.fileUri,
-                isCompleted = task.isCompleted,
-                isPlaying   = task.uniqueId == playingId
+                isCompleted = task.isCompleted
             )
         }
         DashboardUiState.Active(mappedTasks)

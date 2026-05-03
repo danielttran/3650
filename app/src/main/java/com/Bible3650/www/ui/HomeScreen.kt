@@ -30,9 +30,7 @@ fun HomeScreen(
     viewModel: DashboardViewModel
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
-    val currentPosition by viewModel.currentPosition.collectAsStateWithLifecycle()
-    val duration by viewModel.duration.collectAsStateWithLifecycle()
+    val currentMediaId by viewModel.currentMediaId.collectAsStateWithLifecycle()
 
     Box(modifier = modifier.fillMaxSize()) {
         when (val uiState = state) {
@@ -59,119 +57,165 @@ fun HomeScreen(
                 }
             }
             is DashboardUiState.Active -> {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    val groupedTasks = uiState.tasks.groupBy { it.dayOffset }
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        groupedTasks.forEach { (dayOffset, tasks) ->
-                            stickyHeader(key = "header_$dayOffset") {
-                                Surface(
-                                    color = MaterialTheme.colorScheme.background.copy(alpha = 0.95f), 
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "Day ${dayOffset + 1}",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.padding(vertical = 4.dp)
-                                    )
-                                }
-                            }
-                            items(tasks, key = { "daySec_${dayOffset}_list_${it.listId}_task_${it.id}" }) { task ->
-                                ListEntryItem(
-                                    task = task,
-                                    onPlayClick = {
-                                        viewModel.dispatchAction(DashboardAction.PlayFrom(task.id))
-                                    },
-                                    onToggle = { isChecked ->
-                                        if (task.dayOffset == 0) {
-                                            viewModel.dispatchAction(DashboardAction.ToggleTask(task.listId, isChecked))
-                                        }
-                                    }
+                // Memoized so grouping only re-runs when the task list actually changes,
+                // not on every currentMediaId update.
+                val groupedTasks = remember(uiState.tasks) {
+                    uiState.tasks.groupBy { it.dayOffset }
+                }
+                val playingTask = remember(uiState.tasks, currentMediaId) {
+                    uiState.tasks.find { it.id == currentMediaId }
+                }
+
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    groupedTasks.forEach { (dayOffset, tasks) ->
+                        stickyHeader(key = "header_$dayOffset") {
+                            Surface(
+                                color = MaterialTheme.colorScheme.background.copy(alpha = 0.95f),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "Day ${dayOffset + 1}",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(vertical = 4.dp)
                                 )
                             }
                         }
-                        
-                        item {
-                            Spacer(modifier = Modifier.height(140.dp))
+                        items(tasks, key = { "daySec_${dayOffset}_list_${it.listId}_task_${it.id}" }) { task ->
+                            ListEntryItem(
+                                task = task,
+                                isPlaying = task.id == currentMediaId,
+                                onPlayClick = {
+                                    viewModel.dispatchAction(DashboardAction.PlayFrom(task.id))
+                                },
+                                onToggle = { isChecked ->
+                                    if (task.dayOffset == 0) {
+                                        viewModel.dispatchAction(DashboardAction.ToggleTask(task.listId, isChecked))
+                                    }
+                                }
+                            )
                         }
                     }
+
+                    item { Spacer(modifier = Modifier.height(140.dp)) }
                 }
 
-                // Mini Player Bar
-                val playingTask = uiState.tasks.find { it.isPlaying }
-                if (playingTask != null || isPlaying) {
-                    Card(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 24.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer
-                        ),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-                    ) {
-                        Column {
-                            val progress = if (duration > 0) (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
-                            LinearProgressIndicator(
-                                progress = { progress },
-                                modifier = Modifier.fillMaxWidth().height(4.dp),
-                                color = MaterialTheme.colorScheme.primary,
-                                trackColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f)
-                            )
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        playingTask?.title ?: "Audio Player",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                        maxLines = 1
-                                    )
-                                    Text(
-                                        playingTask?.subtitle ?: "Playing...",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                        maxLines = 1
-                                    )
-                                }
-                                IconButton(onClick = { viewModel.dispatchAction(DashboardAction.PlayPause) }) {
-                                    Icon(
-                                        if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                        contentDescription = "Play/Pause"
-                                    )
-                                }
-                                IconButton(onClick = { viewModel.dispatchAction(DashboardAction.SkipNext) }) {
-                                    Icon(Icons.Default.SkipNext, contentDescription = "Skip")
-                                }
-                            }
-                        }
-                    }
-                }
+                // MiniPlayerBar is its own composable so that currentPosition / duration
+                // updates (every ~1 s) only recompose the bar, not the entire screen.
+                MiniPlayerBar(
+                    playingTask = playingTask,
+                    viewModel = viewModel,
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                )
             }
         }
     }
 }
 
 @Composable
-fun ListEntryItem(task: TaskUiModel, onPlayClick: () -> Unit, onToggle: (Boolean) -> Unit) {
+private fun MiniPlayerBar(
+    playingTask: TaskUiModel?,
+    viewModel: DashboardViewModel,
+    modifier: Modifier = Modifier
+) {
+    val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
+    val currentPosition by viewModel.currentPosition.collectAsStateWithLifecycle()
+    val duration by viewModel.duration.collectAsStateWithLifecycle()
+
+    if (playingTask == null && !isPlaying) return
+
+    val progress = if (duration > 0) (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
+    val timeRemaining = remember(duration, currentPosition) { formatTimeRemaining(duration - currentPosition) }
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+    ) {
+        Column {
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth().height(4.dp),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f)
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        playingTask?.title ?: "Audio Player",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        maxLines = 1
+                    )
+                    Text(
+                        playingTask?.subtitle ?: "Playing...",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        maxLines = 1
+                    )
+                    if (duration > 0) {
+                        Text(
+                            timeRemaining,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+                IconButton(onClick = { viewModel.dispatchAction(DashboardAction.PlayPause) }) {
+                    Icon(
+                        if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = "Play/Pause"
+                    )
+                }
+                IconButton(onClick = { viewModel.dispatchAction(DashboardAction.SkipNext) }) {
+                    Icon(Icons.Default.SkipNext, contentDescription = "Skip")
+                }
+            }
+        }
+    }
+}
+
+private fun formatTimeRemaining(remainingMs: Long): String {
+    if (remainingMs <= 0) return "-0:00"
+    val totalSeconds = remainingMs / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) {
+        "-${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+    } else {
+        "-${minutes}:${seconds.toString().padStart(2, '0')}"
+    }
+}
+
+@Composable
+fun ListEntryItem(
+    task: TaskUiModel,
+    isPlaying: Boolean,
+    onPlayClick: () -> Unit,
+    onToggle: (Boolean) -> Unit
+) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .clickable { onPlayClick() },
-        color = if (task.isPlaying) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f) 
+        color = if (isPlaying) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
                 else MaterialTheme.colorScheme.surfaceVariant,
         tonalElevation = 2.dp
     ) {
@@ -192,9 +236,9 @@ fun ListEntryItem(task: TaskUiModel, onPlayClick: () -> Unit, onToggle: (Boolean
             } else {
                 Spacer(modifier = Modifier.width(48.dp))
             }
-            
+
             Spacer(modifier = Modifier.width(8.dp))
-            
+
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = task.title,
@@ -209,7 +253,7 @@ fun ListEntryItem(task: TaskUiModel, onPlayClick: () -> Unit, onToggle: (Boolean
                 )
             }
 
-            if (task.isPlaying) {
+            if (isPlaying) {
                 Box(
                     modifier = Modifier
                         .size(12.dp)
