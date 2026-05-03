@@ -85,6 +85,7 @@ class DashboardViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.initializeDatabaseIfNeeded()
+                repository.freezeActiveTasks()
 
                 // Read from SharedPreferences on IO thread
                 val savedId = audioManager.savedMediaId

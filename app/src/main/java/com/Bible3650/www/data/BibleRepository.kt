@@ -11,6 +11,8 @@ import com.Bible3650.www.data.local.BookMappingEntity
 import com.Bible3650.www.data.local.DailyTask
 import com.Bible3650.www.data.local.ListWithBooks
 import com.Bible3650.www.data.local.ReadingListEntity
+import com.Bible3650.www.domain.DefaultsProvider
+import com.Bible3650.www.domain.ReadingPlanUseCase
 import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -40,28 +42,30 @@ class BibleRepository @Inject constructor(
     // playTasks benefit from the same one-time directory scan.
     internal val folderCache = android.util.LruCache<String, List<String>>(MAX_FOLDER_CACHE_ENTRIES)
     private val cacheMutexes = ConcurrentHashMap<String, Mutex>()
+    
+    private val resolvedUris = MutableStateFlow<Map<String, String>>(emptyMap())
+    private val resolvingTasks = ConcurrentHashMap.newKeySet<String>()
 
-    private val repoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    init {
-        // Freeze unresolved daily tasks outside the flow transform to avoid DB writes
-        // inside a reactive pipeline (which would trigger immediate re-emission cycles).
-        repoScope.launch {
-            dao.observeActivePlaylists()
-                .catch { e -> android.util.Log.e("BibleRepo", "Freeze observer failed", e) }
-                .collect { lists ->
-                    lists.forEach { listData ->
-                        val list = listData.readingList
-                        if (list.activeBook == null || list.activeChapter == null) {
-                            try {
-                                val result = calculateTargetTask(listData, 0)
-                                dao.updateListProgress(list.listId, list.currentDayIndex, result.first, result.second)
-                            } catch (e: Exception) {
-                                android.util.Log.e("BibleRepo", "Failed to freeze task for list ${list.listId}", e)
-                            }
-                        }
+    suspend fun freezeActiveTasks() {
+        val lists = dao.getAllLists()
+        val updates = mutableListOf<suspend () -> Unit>()
+        lists.forEach { listData ->
+            val list = listData.readingList
+            if (list.activeBook == null || list.activeChapter == null) {
+                try {
+                    val result = ReadingPlanUseCase.calculateTargetTask(listData, 0)
+                    updates.add {
+                        dao.updateListProgress(list.listId, list.currentDayIndex, result.first, result.second)
                     }
+                } catch (e: Exception) {
+                    android.util.Log.e("BibleRepo", "Failed to freeze task for list ${list.listId}", e)
                 }
+            }
+        }
+        if (updates.isNotEmpty()) {
+            database.withTransaction {
+                updates.forEach { it.invoke() }
+            }
         }
     }
 
@@ -72,12 +76,31 @@ class BibleRepository @Inject constructor(
 
     val dailyTasksFlow: Flow<List<DailyTask>> = combine(
         dao.observeActivePlaylists(),
-        audioSourceDao.observeActiveMappings()
-    ) { lists, activeMappings ->
+        audioSourceDao.observeActiveMappings(),
+        resolvedUris
+    ) { lists, activeMappings, uris ->
         val mappingsByBook = activeMappings.associateBy { it.bookName }
         val activeSource   = audioSourceDao.getActiveSource()
-        lists.map { listData ->
+        
+        val tasks = lists.map { listData ->
             resolveDailyTask(listData, 0, mappingsByBook, activeSource)
+        }
+        
+        val missing = tasks.filter { it.fileUri.isEmpty() && resolvingTasks.add(it.uniqueId) }
+        if (missing.isNotEmpty()) {
+            CoroutineScope(Dispatchers.IO).launch {
+                val newUris = missing.associate { task ->
+                    task.uniqueId to getTaskFileUri(task.targetBook, task.targetChapter)
+                }
+                resolvedUris.update { it + newUris }
+                missing.forEach { resolvingTasks.remove(it.uniqueId) }
+            }
+        }
+        
+        tasks.map { task ->
+            if (task.fileUri.isEmpty()) {
+                task.copy(fileUri = uris[task.uniqueId] ?: "")
+            } else task
         }
     }
         .distinctUntilChanged()
@@ -97,19 +120,7 @@ class BibleRepository @Inject constructor(
     }
 
     private suspend fun insertDefaultLists() {
-        val standardLists = listOf(
-            "List 1: Gospels"                       to listOf("Matthew", "Mark", "Luke", "John"),
-            "List 2: Pentateuch"                    to listOf("Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy"),
-            "List 3: Pauline Epistles & Hebrews"    to listOf("Romans", "1 Corinthians", "2 Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians", "Hebrews"),
-            "List 4: General Epistles & Revelation" to listOf("1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation"),
-            "List 5: Wisdom"                        to listOf("Job", "Ecclesiastes", "Song of Songs"),
-            "List 6: Psalms"                        to listOf("Psalm"),
-            "List 7: Proverbs"                      to listOf("Proverbs"),
-            "List 8: History"                       to listOf("Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther"),
-            "List 9: Prophets"                      to listOf("Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi"),
-            "List 10: Acts"                         to listOf("Acts")
-        )
-        standardLists.forEachIndexed { index, (name, books) ->
+        DefaultsProvider.standardLists.forEachIndexed { index, (name, books) ->
             dao.createCustomList(ReadingListEntity(listName = name, listOrder = index, listColor = 0), books)
         }
     }
@@ -129,29 +140,22 @@ class BibleRepository @Inject constructor(
         val targetChapter: Int
 
         if (dayOffset == 0) {
-            // Use frozen state if available; otherwise calculate dynamically.
-            // The actual DB freeze is performed by the init observer in repoScope
-            // to keep this flow transform free of side effects.
             if (list.activeBook != null && list.activeChapter != null) {
                 targetBook = list.activeBook
                 targetChapter = list.activeChapter
             } else {
-                val result = calculateTargetTask(listData, 0)
+                val result = ReadingPlanUseCase.calculateTargetTask(listData, 0)
                 targetBook = result.first
                 targetChapter = result.second
             }
         } else {
-            // Future tasks: always calculate dynamically based on current list config
-            val result = calculateTargetTask(listData, dayOffset)
+            val result = ReadingPlanUseCase.calculateTargetTask(listData, dayOffset)
             targetBook = result.first
             targetChapter = result.second
         }
 
-        val mapping  = mappingsByBook[targetBook]
-        val fileUri  = if (mapping != null && activeSource != null) {
-            val treeUri = (mapping.overrideTreeUri ?: activeSource.rootTreeUri).toUri()
-            resolveChapterFile(treeUri, mapping.folderDocId, targetChapter, folderCache)?.toString() ?: ""
-        } else ""
+        // fileUri is resolved asynchronously later by the ViewModel to prevent IPC blocking
+        val fileUri = ""
 
         val totalChapters = listData.books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
 
@@ -168,21 +172,17 @@ class BibleRepository @Inject constructor(
         )
     }
 
-    private fun calculateTargetTask(listData: ListWithBooks, dayOffset: Int): Pair<String, Int> {
-        val books = listData.books.sortedBy { it.sortOrder }
-        val totalChapters = books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
-
-        if (books.isEmpty() || totalChapters == 0) return "Empty" to 0
-
-        val absoluteDay = listData.readingList.currentDayIndex + dayOffset + listData.readingList.manualOffset
-        var normalizedDay = ((absoluteDay - 1).mod(totalChapters)) + 1
-
-        for (book in books) {
-            val count = BibleRegistry.getChapterCount(book.bookName)
-            if (normalizedDay <= count) return book.bookName to normalizedDay
-            normalizedDay -= count
+    suspend fun getTaskFileUri(targetBook: String, targetChapter: Int): String {
+        val activeSource = audioSourceDao.getActiveSource() ?: return ""
+        val mapping = audioSourceDao.getMappingForBook(activeSource.sourceId, targetBook) ?: return ""
+        
+        return try {
+            val treeUri = (mapping.overrideTreeUri ?: activeSource.rootTreeUri).toUri()
+            resolveChapterFile(treeUri, mapping.folderDocId, targetChapter, folderCache)?.toString() ?: ""
+        } catch (e: Exception) {
+            android.util.Log.e("BibleRepo", "Failed to resolve audio for $targetBook $targetChapter", e)
+            ""
         }
-        return "Empty" to 0
     }
 
     suspend fun advanceListDay(listId: Long) {

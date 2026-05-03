@@ -27,6 +27,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineDispatcher
+import com.Bible3650.www.di.MainDispatcher
+import com.Bible3650.www.di.IoDispatcher
 
 private const val PREFS_NAME = "audio_playback_state"
 private const val KEY_MEDIA_ID = "last_media_id"
@@ -35,7 +38,9 @@ private const val KEY_POSITION = "last_position_ms"
 @Singleton
 class AudioControllerManager @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val repository: BibleRepository
+    private val repository: BibleRepository,
+    @MainDispatcher private val mainDispatcher: CoroutineDispatcher,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private val _player = MutableStateFlow<Player?>(null)
@@ -53,7 +58,7 @@ class AudioControllerManager @Inject constructor(
     private val _duration = MutableStateFlow(0L)
     val duration: StateFlow<Long> = _duration
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + mainDispatcher)
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private var positionUpdateJob: Job? = null
@@ -207,7 +212,7 @@ class AudioControllerManager @Inject constructor(
 
         val requestId = ++currentPlaylistRequestId
 
-        scope.launch(Dispatchers.IO) {
+        scope.launch(ioDispatcher) {
             try {
                 // 1. Resolve ONLY the first item to start playing immediately
                 val firstTask = tasks.getOrNull(startIndex) ?: return@launch
@@ -224,7 +229,7 @@ class AudioControllerManager @Inject constructor(
 
                 val firstUri = resolveUri(firstTask)
 
-                withContext(Dispatchers.Main) {
+                withContext(mainDispatcher) {
                     if (requestId != currentPlaylistRequestId) return@withContext
 
                     val firstItem = MediaItem.Builder()
@@ -259,7 +264,7 @@ class AudioControllerManager @Inject constructor(
                     )
                 }
 
-                withContext(Dispatchers.Main) {
+                withContext(mainDispatcher) {
                     if (requestId != currentPlaylistRequestId) return@withContext
 
                     val before = allMediaItems.take(startIndex)

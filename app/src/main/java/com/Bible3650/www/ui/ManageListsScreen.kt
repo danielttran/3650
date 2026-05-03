@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -452,29 +453,59 @@ fun ManageListsScreen(
                             }
                         }
 
-                        Text("Selected Books (Tap to remove)", style = MaterialTheme.typography.titleSmall)
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            items(selectedBooks, key = { "selected_$it" }) { book ->
-                                InputChip(
-                                    selected = true,
-                                    onClick = { selectedBooks = selectedBooks.filter { it != book } },
-                                    label = { Text(book) },
-                                    trailingIcon = {
-                                        Icon(Icons.Default.Close, contentDescription = "Remove",
-                                             modifier = Modifier.size(16.dp))
+                        Text("Selected Books", style = MaterialTheme.typography.titleSmall)
+                        if (selectedBooks.isEmpty()) {
+                            Text(
+                                "No books selected",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                itemsIndexed(selectedBooks, key = { _, book -> "selected_$book" }) { idx, book ->
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(book, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                            IconButton(
+                                                onClick = {
+                                                    if (idx > 0) {
+                                                        val m = selectedBooks.toMutableList()
+                                                        m[idx] = m[idx - 1].also { m[idx - 1] = m[idx] }
+                                                        selectedBooks = m
+                                                    }
+                                                },
+                                                enabled = idx > 0
+                                            ) {
+                                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move Up")
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    if (idx < selectedBooks.size - 1) {
+                                                        val m = selectedBooks.toMutableList()
+                                                        m[idx] = m[idx + 1].also { m[idx + 1] = m[idx] }
+                                                        selectedBooks = m
+                                                    }
+                                                },
+                                                enabled = idx < selectedBooks.size - 1
+                                            ) {
+                                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down")
+                                            }
+                                            IconButton(
+                                                onClick = { selectedBooks = selectedBooks.filter { it != book } }
+                                            ) {
+                                                Icon(Icons.Default.Close, contentDescription = "Remove")
+                                            }
+                                        }
                                     }
-                                )
-                            }
-                            if (selectedBooks.isEmpty()) {
-                                item {
-                                    Text(
-                                        "No books selected",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
                                 }
                             }
                         }

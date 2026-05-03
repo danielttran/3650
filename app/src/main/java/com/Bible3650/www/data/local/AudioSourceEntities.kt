@@ -59,6 +59,9 @@ interface AudioSourceDao {
     @Query("SELECT * FROM audio_sources WHERE is_active = 1 LIMIT 1")
     suspend fun getActiveSource(): AudioSourceEntity?
 
+    @Query("SELECT * FROM book_mappings WHERE sourceId = :sourceId AND bookName = :bookName LIMIT 1")
+    suspend fun getMappingForBook(sourceId: Long, bookName: String): BookMappingEntity?
+
     @Transaction
     @Query("SELECT * FROM audio_sources WHERE sourceId = :id")
     suspend fun getSourceWithMappings(id: Long): SourceWithMappings?
