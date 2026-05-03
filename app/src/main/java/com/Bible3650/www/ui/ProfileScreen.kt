@@ -16,7 +16,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,11 +39,17 @@ fun ProfileScreen(
     ) { uri ->
         uri?.let {
             scope.launch {
-                val json = viewModel.exportData()
-                context.contentResolver.openOutputStream(it)?.use { stream ->
-                    stream.write(json.toByteArray())
+                try {
+                    val json = viewModel.exportData()
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(it)?.use { stream ->
+                            stream.write(json.toByteArray())
+                        }
+                    }
+                    snackbarHostState.showSnackbar("Progress exported successfully")
+                } catch (e: Exception) {
+                    snackbarHostState.showSnackbar("Export failed")
                 }
-                snackbarHostState.showSnackbar("Progress exported successfully")
             }
         }
     }
@@ -52,10 +60,16 @@ fun ProfileScreen(
         uri?.let {
             scope.launch {
                 try {
-                    context.contentResolver.openInputStream(it)?.use { stream ->
-                        val json = stream.bufferedReader().readText()
+                    val json = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(it)?.use { stream ->
+                            stream.bufferedReader().readText()
+                        }
+                    }
+                    if (json != null) {
                         pendingImportJson = json
                         showImportConfirm = true
+                    } else {
+                        snackbarHostState.showSnackbar("Failed to read backup file")
                     }
                 } catch (e: Exception) {
                     snackbarHostState.showSnackbar("Failed to read backup file")
@@ -85,7 +99,7 @@ fun ProfileScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "Total Chapters Read",
+                        text = "Total Chapters",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )

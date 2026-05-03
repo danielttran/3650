@@ -12,6 +12,7 @@ import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import androidx.media3.common.Player
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -81,8 +82,10 @@ class AudioPlaybackService : MediaLibraryService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo) = mediaLibrarySession
 
     override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
         val activePlayer = mediaLibrarySession?.player
-        if (activePlayer == null || !activePlayer.playWhenReady) {
+        if (activePlayer == null || !activePlayer.playWhenReady || activePlayer.playbackState == Player.STATE_ENDED) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
     }

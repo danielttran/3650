@@ -41,15 +41,21 @@ class BibleRepository @Inject constructor(
         // Freeze unresolved daily tasks outside the flow transform to avoid DB writes
         // inside a reactive pipeline (which would trigger immediate re-emission cycles).
         repoScope.launch {
-            dao.observeActivePlaylists().collect { lists ->
-                lists.forEach { listData ->
-                    val list = listData.readingList
-                    if (list.activeBook == null || list.activeChapter == null) {
-                        val result = calculateTargetTask(listData, 0)
-                        dao.updateListProgress(list.listId, list.currentDayIndex, result.first, result.second)
+            dao.observeActivePlaylists()
+                .catch { e -> android.util.Log.e("BibleRepo", "Freeze observer failed", e) }
+                .collect { lists ->
+                    lists.forEach { listData ->
+                        val list = listData.readingList
+                        if (list.activeBook == null || list.activeChapter == null) {
+                            try {
+                                val result = calculateTargetTask(listData, 0)
+                                dao.updateListProgress(list.listId, list.currentDayIndex, result.first, result.second)
+                            } catch (e: Exception) {
+                                android.util.Log.e("BibleRepo", "Failed to freeze task for list ${list.listId}", e)
+                            }
+                        }
                     }
                 }
-            }
         }
     }
 
