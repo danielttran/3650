@@ -12,13 +12,18 @@ import com.Bible3650.www.data.local.DailyTask
 import com.Bible3650.www.data.local.ListWithBooks
 import com.Bible3650.www.data.local.ReadingListEntity
 import com.google.gson.Gson
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+
+private const val MAX_FOLDER_CACHE_ENTRIES = 100
 
 @Singleton
 class BibleRepository @Inject constructor(
@@ -29,6 +34,24 @@ class BibleRepository @Inject constructor(
     // Shared cache of folder→sorted-docIds so both dailyTasksFlow and
     // playTasks benefit from the same one-time directory scan.
     internal val folderCache = ConcurrentHashMap<String, List<String>>()
+
+    private val repoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        // Freeze unresolved daily tasks outside the flow transform to avoid DB writes
+        // inside a reactive pipeline (which would trigger immediate re-emission cycles).
+        repoScope.launch {
+            dao.observeActivePlaylists().collect { lists ->
+                lists.forEach { listData ->
+                    val list = listData.readingList
+                    if (list.activeBook == null || list.activeChapter == null) {
+                        val result = calculateTargetTask(listData, 0)
+                        dao.updateListProgress(list.listId, list.currentDayIndex, result.first, result.second)
+                    }
+                }
+            }
+        }
+    }
 
     fun clearCache() {
         folderCache.clear()
@@ -44,6 +67,7 @@ class BibleRepository @Inject constructor(
             resolveDailyTask(listData, 0, mappingsByBook, activeSource)
         }
     }
+        .distinctUntilChanged()
         .catch { e ->
             android.util.Log.e("BibleRepo", "Error in dailyTasksFlow", e)
             emit(emptyList())
@@ -88,17 +112,16 @@ class BibleRepository @Inject constructor(
         val targetChapter: Int
 
         if (dayOffset == 0) {
-            // FROZEN STATE: For the current task (offset 0), check if it's already frozen
+            // Use frozen state if available; otherwise calculate dynamically.
+            // The actual DB freeze is performed by the init observer in repoScope
+            // to keep this flow transform free of side effects.
             if (list.activeBook != null && list.activeChapter != null) {
                 targetBook = list.activeBook
                 targetChapter = list.activeChapter
             } else {
-                // Calculate and freeze
                 val result = calculateTargetTask(listData, 0)
                 targetBook = result.first
                 targetChapter = result.second
-                // Update DB with frozen state
-                dao.updateListProgress(list.listId, list.currentDayIndex, targetBook, targetChapter)
             }
         } else {
             // Future tasks: always calculate dynamically based on current list config
@@ -147,7 +170,7 @@ class BibleRepository @Inject constructor(
     suspend fun advanceListDay(listId: Long) {
         val list = dao.getListById(listId) ?: return
         val newIndex = list.currentDayIndex + 1
-        // Setting book/chapter to null forces calculateAndFreezeNextTask (in resolveDailyTask) to run on next emission
+        // Setting book/chapter to null lets the init observer freeze the next task
         dao.updateListProgress(listId, newIndex, null, null)
     }
 
@@ -183,10 +206,10 @@ class BibleRepository @Inject constructor(
         } ?: return@withContext false
 
         try {
-            // We use a simple sequential clear/insert here. 
-            // In a full production app, we would wrap this in a single DB transaction 
+            // We use a simple sequential clear/insert here.
+            // In a full production app, we would wrap this in a single DB transaction
             // across both DAOs using database.runInTransaction {}.
-            
+
             dao.clearAllBooks()
             dao.clearAllLists()
             audioSourceDao.clearAllMappings()
@@ -203,7 +226,7 @@ class BibleRepository @Inject constructor(
                 val newId = audioSourceDao.insertSource(source)
                 audioSourceDao.upsertMappings(sb.mappings.map { it.copy(sourceId = newId) })
             }
-            
+
             folderCache.clear()
             true
         } catch (e: Exception) {
@@ -215,8 +238,8 @@ class BibleRepository @Inject constructor(
     // Returns the content URI for the Nth audio file (1-based) inside a SAF folder,
     // sorted with natural (numeric) ordering so "Chapter 10" follows "Chapter 9".
     fun resolveChapterFile(
-        treeUri: Uri, 
-        folderDocId: String, 
+        treeUri: Uri,
+        folderDocId: String,
         chapterIndex: Int,
         cache: MutableMap<String, List<String>>? = null
     ): Uri? {
@@ -241,7 +264,7 @@ class BibleRepository @Inject constructor(
                     val nameIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
                     val idIdx   = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
                     val mimeIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
-                    
+
                     if (nameIdx == -1 || (idIdx == -1) || (mimeIdx == -1)) {
                         android.util.Log.e("BibleRepo", "Required columns missing in query")
                         return@use
@@ -265,12 +288,14 @@ class BibleRepository @Inject constructor(
                 cache?.put(cacheKey, empty)
                 empty
             } else {
-                val sortedDocIds = files
+                val sorted = files
                     .map { it.second to tokenize(it.first) }
                     .sortedWith { a, b -> compareTokens(a.second, b.second) }
                     .map { it.first }
-                cache?.put(cacheKey, sortedDocIds)
-                sortedDocIds
+                // Evict cache entirely when it grows too large to cap memory usage
+                if (cache != null && cache.size >= MAX_FOLDER_CACHE_ENTRIES) cache.clear()
+                cache?.put(cacheKey, sorted)
+                sorted
             }
         }
 

@@ -82,11 +82,11 @@ class DashboardViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.initializeDatabaseIfNeeded()
-                
+
                 // Read from SharedPreferences on IO thread
                 val savedId = audioManager.savedMediaId
                 val savedPos = audioManager.savedPosition
-                
+
                 withContext(Dispatchers.Main) {
                     tryRestorePlayback(savedId, savedPos)
                 }
@@ -94,16 +94,8 @@ class DashboardViewModel @Inject constructor(
                 android.util.Log.e("DashboardVM", "Initialization failed", e)
             }
         }
-
-        viewModelScope.launch {
-            audioManager.completedTracks.collect { listId ->
-                try {
-                    repository.advanceListDay(listId)
-                } catch (e: Exception) {
-                    android.util.Log.e("DashboardVM", "Error advancing day", e)
-                }
-            }
-        }
+        // Track completion is now handled inside AudioControllerManager's own scope,
+        // ensuring advanceListDay runs even when the UI is in the background.
     }
 
     val isPlaying: StateFlow<Boolean> = audioManager.isPlaying
@@ -114,18 +106,17 @@ class DashboardViewModel @Inject constructor(
         // taskId for day 0 is always "listId_0"
         val currentId = currentMediaId.value
         if (currentId == "${listId}_0") {
-            // Wait for the repository to finish the 'calculate and freeze' cycle
-            // so we don't accidentally play the old chapter or an empty URI.
-            val updatedTasks = repository.dailyTasksFlow
-                .filter { tasks ->
-                    tasks.any { it.listId == listId && it.fileUri.isNotEmpty() }
-                }
-                .first()
+            // Guard against an indefinitely-suspended coroutine when the audio source
+            // folder is missing or unlinked (fileUri would never become non-empty).
+            val updatedTasks = withTimeoutOrNull(5_000) {
+                repository.dailyTasksFlow
+                    .filter { tasks -> tasks.any { it.listId == listId && it.fileUri.isNotEmpty() } }
+                    .first()
+            } ?: return  // Audio source unavailable; skip resync
 
             val startIndex = updatedTasks.indexOfFirst { it.uniqueId == currentId }
             if (startIndex != -1) {
                 val playlist = updatedTasks.drop(startIndex) + updatedTasks.take(startIndex)
-                // Resume from start of new chapter. If it was playing, it stays playing.
                 audioManager.playTasks(playlist, 0)
             }
         }
@@ -133,7 +124,7 @@ class DashboardViewModel @Inject constructor(
 
     private suspend fun tryRestorePlayback(savedId: String?, savedPos: Long) {
         if (savedId == null) return
-        
+
         // Timeout to avoid hanging if controller never connects
         val player = withTimeoutOrNull(5000) {
             audioManager.player.first { it != null }
@@ -141,12 +132,15 @@ class DashboardViewModel @Inject constructor(
 
         if (player.mediaItemCount > 0) return
         if (player.playbackState != Player.STATE_IDLE) return
-        
+
         val tasks = repository.dailyTasksFlow.firstOrNull() ?: return
         val index = tasks.indexOfFirst { it.uniqueId == savedId }
         if (index == -1) return
 
-        audioManager.playTasks(tasks, index, savedPos)
+        // Reorder so the saved track is at index 0; prevents prepending items at index 0
+        // into an active ExoPlayer timeline which shifts currentMediaItemIndex.
+        val playlist = tasks.drop(index) + tasks.take(index)
+        audioManager.playTasks(playlist, 0, savedPos)
         player.pause()
     }
 
