@@ -180,9 +180,11 @@ fun ReviewMappingsScreen(
 
     Scaffold(
         modifier = Modifier.fillMaxSize()
-    ) { _ ->
+    ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {

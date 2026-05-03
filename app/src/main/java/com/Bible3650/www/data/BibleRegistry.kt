@@ -75,6 +75,9 @@ object BibleRegistry {
         BibleBook("Revelation",     22, "New Testament")
     )
 
-    fun getChapterCount(bookName: String): Int = books.find { it.name == bookName }?.chapterCount ?: 0
-    fun getAllBooks(): List<String> = books.map { it.name }
+    private val chapterCountByName: Map<String, Int> = books.associate { it.name to it.chapterCount }
+    private val allBookNames: List<String> = books.map { it.name }
+
+    fun getChapterCount(bookName: String): Int = chapterCountByName[bookName] ?: 0
+    fun getAllBooks(): List<String> = allBookNames
 }
