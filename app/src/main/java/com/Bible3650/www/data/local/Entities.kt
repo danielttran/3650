@@ -72,7 +72,7 @@ interface BibleDao {
     """)
     suspend fun atomicAdvanceDay()
 
-    @Query("UPDATE reading_lists SET current_absolute_day = current_absolute_day + 1 WHERE listId = :id")
+    @Query("UPDATE reading_lists SET current_absolute_day = current_absolute_day + 1, is_completed_today = 0 WHERE listId = :id")
     suspend fun advanceListDay(id: Long)
 
     @Query("UPDATE reading_lists SET is_completed_today = :status WHERE listId = :id")

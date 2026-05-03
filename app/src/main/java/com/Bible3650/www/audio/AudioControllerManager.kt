@@ -2,6 +2,7 @@ package com.Bible3650.www.audio
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -12,6 +13,8 @@ import com.google.common.util.concurrent.MoreExecutors
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.net.Uri
@@ -21,6 +24,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
+
+private const val PREFS_NAME = "audio_playback_state"
+private const val KEY_MEDIA_ID = "last_media_id"
+private const val KEY_POSITION = "last_position_ms"
 
 @Singleton
 class AudioControllerManager @Inject constructor(
@@ -45,6 +52,12 @@ class AudioControllerManager @Inject constructor(
     private val _duration = MutableStateFlow(0L)
     val duration: StateFlow<Long> = _duration
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    val savedMediaId: String? get() = prefs.getString(KEY_MEDIA_ID, null)
+    val savedPosition: Long get() = prefs.getLong(KEY_POSITION, 0L)
+
     init {
         initializeController()
     }
@@ -55,26 +68,42 @@ class AudioControllerManager @Inject constructor(
         controllerFuture?.addListener({
             val mediaController = controllerFuture?.get()
             _player.value = mediaController
-            
-            CoroutineScope(Dispatchers.Main).launch {
+
+            scope.launch {
+                var lastSavedPosition = 0L
                 while (true) {
                     _player.value?.let { p ->
                         if (p.isPlaying) {
-                            _currentPosition.value = p.currentPosition
+                            val pos = p.currentPosition
+                            _currentPosition.value = pos
                             _duration.value = p.duration.coerceAtLeast(0L)
+                            if (pos - lastSavedPosition >= 5000L) {
+                                prefs.edit().putLong(KEY_POSITION, pos).apply()
+                                lastSavedPosition = pos
+                            }
                         }
                     }
                     delay(1000)
                 }
             }
-            
+
             mediaController?.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     _isPlaying.value = isPlaying
+                    if (!isPlaying) {
+                        mediaController.currentPosition.let { pos ->
+                            prefs.edit().putLong(KEY_POSITION, pos).apply()
+                            _currentPosition.value = pos
+                        }
+                    }
                 }
 
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                    _currentMediaId.value = mediaItem?.mediaId
+                    val id = mediaItem?.mediaId
+                    _currentMediaId.value = id
+                    if (id != null) {
+                        prefs.edit().putString(KEY_MEDIA_ID, id).putLong(KEY_POSITION, 0L).apply()
+                    }
                 }
 
                 override fun onPositionDiscontinuity(
@@ -94,6 +123,7 @@ class AudioControllerManager @Inject constructor(
                         mediaController.currentMediaItem?.mediaId?.substringBefore("_")?.toLongOrNull()?.let { listId ->
                             _completedTracks.tryEmit(listId)
                         }
+                        prefs.edit().remove(KEY_MEDIA_ID).remove(KEY_POSITION).apply()
                     }
                 }
 
@@ -104,9 +134,9 @@ class AudioControllerManager @Inject constructor(
         }, MoreExecutors.directExecutor())
     }
 
-    fun playTasks(tasks: List<DailyTask>, startIndex: Int = 0) {
+    fun playTasks(tasks: List<DailyTask>, startIndex: Int = 0, startPositionMs: Long = androidx.media3.common.C.TIME_UNSET) {
         val player = _player.value ?: return
-        
+
         val mediaItems = tasks.map { task ->
             MediaItem.Builder()
                 .setMediaId(task.uniqueId)
@@ -117,12 +147,12 @@ class AudioControllerManager @Inject constructor(
                 )
                 .build()
         }
-        
-        player.setMediaItems(mediaItems, startIndex, androidx.media3.common.C.TIME_UNSET)
+
+        player.setMediaItems(mediaItems, startIndex, startPositionMs)
         player.prepare()
         player.play()
     }
-    
+
     fun togglePlayPause() {
         val player = _player.value ?: return
         if (player.isPlaying) {
@@ -131,8 +161,13 @@ class AudioControllerManager @Inject constructor(
             player.play()
         }
     }
-    
+
     fun skipToNext() {
         _player.value?.seekToNext()
+    }
+
+    fun release() {
+        scope.cancel()
+        controllerFuture?.let { MediaController.releaseFuture(it) }
     }
 }
