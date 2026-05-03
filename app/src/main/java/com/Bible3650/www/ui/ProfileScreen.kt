@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -162,11 +163,13 @@ fun ProfileScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(uiState.bookStats, key = { it.bookName }) { stat ->
+                    val cardColor = when {
+                        stat.listColor != 0 -> Color(stat.listColor)
+                        else -> MaterialTheme.colorScheme.surfaceVariant
+                    }
                     Card(
                         shape = RoundedCornerShape(8.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (stat.readCount > 0) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                        )
+                        colors = CardDefaults.cardColors(containerColor = cardColor)
                     ) {
                         Column(
                             modifier = Modifier
@@ -177,14 +180,17 @@ fun ProfileScreen(
                             Text(
                                 text = stat.bookName,
                                 style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.SemiBold,
                                 textAlign = TextAlign.Center,
                                 maxLines = 1
                             )
                             Text(
                                 text = "(${stat.readCount})",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (stat.readCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (stat.readCount > 0)
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }

@@ -25,6 +25,13 @@ import javax.inject.Singleton
 
 private const val MAX_FOLDER_CACHE_ENTRIES = 100
 
+// ARGB Int values matching ListColorPalette in the UI layer (avoids importing Compose in data layer)
+private val DEFAULT_LIST_COLOR_INTS = listOf(
+    0xFFCFE2F3.toInt(), 0xFFD5E8D4.toInt(), 0xFFFFE6CC.toInt(), 0xFFE1D5E7.toInt(),
+    0xFFFFF2CC.toInt(), 0xFFF8D7DA.toInt(), 0xFFD4EDDA.toInt(), 0xFFFDE8D4.toInt(),
+    0xFFD1ECF1.toInt(), 0xFFE8D5E0.toInt(), 0xFFD5E5F5.toInt(), 0xFFF5ECD7.toInt(),
+)
+
 @Singleton
 class BibleRepository @Inject constructor(
     val dao: BibleDao,
@@ -99,7 +106,8 @@ class BibleRepository @Inject constructor(
             "List 10: Acts"                         to listOf("Acts")
         )
         standardLists.forEachIndexed { index, (name, books) ->
-            dao.createCustomList(ReadingListEntity(listName = name, listOrder = index), books)
+            val color = DEFAULT_LIST_COLOR_INTS.getOrElse(index) { 0 }
+            dao.createCustomList(ReadingListEntity(listName = name, listOrder = index, listColor = color), books)
         }
     }
 

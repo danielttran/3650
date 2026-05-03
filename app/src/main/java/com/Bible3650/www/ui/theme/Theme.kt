@@ -6,12 +6,11 @@ import androidx.compose.runtime.Composable
 
 @Composable
 fun Bible3650Theme(
-    darkTheme: Boolean = false,
-    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     MaterialTheme(
         colorScheme = lightColorScheme(),
+        typography = AppTypography,
         content = content
     )
 }
