@@ -54,6 +54,7 @@ fun ManageListsScreen(
     var editingList by remember { mutableStateOf<com.Bible3650.www.data.local.ReadingListEntity?>(null) }
     var listNameInput by remember { mutableStateOf("") }
     var selectedBooks by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pendingDeleteList by remember { mutableStateOf<com.Bible3650.www.data.local.ReadingListEntity?>(null) }
 
     val validationResults by viewModel.validationResults.collectAsStateWithLifecycle()
 
@@ -287,7 +288,7 @@ fun ManageListsScreen(
                             }) {
                                 Icon(Icons.Default.Edit, contentDescription = "Edit")
                             }
-                            IconButton(onClick = { viewModel.deleteList(listData.readingList) }) {
+                            IconButton(onClick = { pendingDeleteList = listData.readingList }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete",
                                      tint = MaterialTheme.colorScheme.error)
                             }
@@ -296,6 +297,28 @@ fun ManageListsScreen(
                 }
             }
         }
+    }
+
+    // ----------------------------------------------------------------
+    // Delete confirmation dialog
+    // ----------------------------------------------------------------
+    pendingDeleteList?.let { listToDelete ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteList = null },
+            title = { Text("Delete \"${listToDelete.listName}\"?") },
+            text = { Text("This will permanently delete the list and all reading progress. This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteList(listToDelete)
+                        pendingDeleteList = null
+                    }
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteList = null }) { Text("Cancel") }
+            }
+        )
     }
 
     // ----------------------------------------------------------------

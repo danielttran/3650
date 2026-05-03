@@ -1,7 +1,6 @@
 package com.Bible3650.www.data
 
 import android.content.ContentResolver
-import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.core.net.toUri
@@ -12,7 +11,6 @@ import com.Bible3650.www.data.local.BookMappingEntity
 import com.Bible3650.www.data.local.DailyTask
 import com.Bible3650.www.data.local.ListWithBooks
 import com.Bible3650.www.data.local.ReadingListEntity
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withTimeoutOrNull
@@ -23,8 +21,7 @@ import javax.inject.Singleton
 class BibleRepository @Inject constructor(
     val dao: BibleDao,
     val audioSourceDao: AudioSourceDao,
-    private val contentResolver: ContentResolver,
-    @ApplicationContext context: Context
+    private val contentResolver: ContentResolver
 ) {
     // Shared cache of folder→sorted-docIds so both dailyTasksFlow and
     // playTasks benefit from the same one-time directory scan.
@@ -156,7 +153,8 @@ class BibleRepository @Inject constructor(
         chapterIndex: Int,
         cache: MutableMap<String, List<String>>? = null
     ): Uri? {
-        val cachedFiles = cache?.get(folderDocId)
+        val cacheKey = "${treeUri}::${folderDocId}"
+        val cachedFiles = cache?.get(cacheKey)
         val sortedDocIds = if (cachedFiles != null) {
             cachedFiles
         } else {
@@ -197,12 +195,12 @@ class BibleRepository @Inject constructor(
             if (files.isEmpty()) {
                 android.util.Log.w("BibleRepo", "No audio files found in $folderDocId")
                 val empty = emptyList<String>()
-                cache?.put(folderDocId, empty)
+                cache?.put(cacheKey, empty)
                 empty
             } else {
                 files.sortWith(Comparator { a, b -> naturalCompare(a.first, b.first) })
                 val docIds = files.map { it.second }
-                cache?.put(folderDocId, docIds)
+                cache?.put(cacheKey, docIds)
                 docIds
             }
         }
