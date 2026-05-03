@@ -154,8 +154,7 @@ fun ReviewMappingsScreen(
         if ((uri != null) && (pendingBook != null)) {
             context.contentResolver.takePersistableUriPermission(
                 uri,
-                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
             // Count audio files in the picked folder to confirm it's the right one
             val fileCount = countAudioFilesInTree(context.contentResolver, uri)

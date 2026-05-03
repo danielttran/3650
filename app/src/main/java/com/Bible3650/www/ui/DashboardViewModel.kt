@@ -121,9 +121,6 @@ class DashboardViewModel @Inject constructor(
         player.pause()
     }
 
-    /** Extend the scrollable day-window so the home list grows as needed. */
-    fun loadMoreDays() = repository.expandWindow()
-
     fun dispatchAction(action: DashboardAction) {
         android.util.Log.d("DashboardVM", "Dispatching action: $action")
         when (action) {
@@ -144,23 +141,10 @@ class DashboardViewModel @Inject constructor(
                     val tasks = repository.dailyTasksFlow.first()
                     val startIndex = tasks.indexOfFirst { it.uniqueId == action.taskId }
                     if (startIndex == -1) return@launch
-
-                    if (tasks[startIndex].dayOffset == 0) {
-                        // Reorder so ALL of today's tasks are played before any future-day
-                        // tasks, starting from the tapped list and wrapping around.
-                        // Without this, lists that appear before the tapped list in the
-                        // array are placed in the "before" block and skipped during
-                        // forward auto-play, leaving those lists unadvanced.
-                        val todayTasks  = tasks.filter { it.dayOffset == 0 }
-                        val todayStart  = todayTasks.indexOfFirst { it.uniqueId == action.taskId }
-                        val futureTasks = tasks.filter { it.dayOffset > 0 }
-                        val playlist    = todayTasks.drop(todayStart) +
-                                          todayTasks.take(todayStart) +
-                                          futureTasks
-                        audioManager.playTasks(playlist, 0)
-                    } else {
-                        audioManager.playTasks(tasks, startIndex)
-                    }
+                    // Wrap playlist so tapped item plays first, then remaining tasks,
+                    // then loops back to the beginning of today's list.
+                    val playlist = tasks.drop(startIndex) + tasks.take(startIndex)
+                    audioManager.playTasks(playlist, 0)
                 }
             }
             is DashboardAction.PlayPause -> audioManager.togglePlayPause()
