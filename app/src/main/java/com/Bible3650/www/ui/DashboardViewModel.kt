@@ -7,8 +7,11 @@ import androidx.media3.common.Player
 import com.Bible3650.www.audio.AudioControllerManager
 import com.Bible3650.www.data.BibleRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 @Immutable
@@ -66,9 +69,11 @@ class DashboardViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardUiState.Loading)
 
     init {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.initializeDatabaseIfNeeded()
-            tryRestorePlayback()
+            withContext(Dispatchers.Main) {
+                tryRestorePlayback()
+            }
         }
 
         viewModelScope.launch {
@@ -85,12 +90,19 @@ class DashboardViewModel @Inject constructor(
     private suspend fun tryRestorePlayback() {
         val savedId  = audioManager.savedMediaId ?: return
         val savedPos = audioManager.savedPosition
-        val player   = audioManager.player.first { it != null } ?: return
+        
+        // Timeout to avoid hanging if controller never connects
+        val player = withTimeoutOrNull(5000) {
+            audioManager.player.first { it != null }
+        } ?: return
+
         if (player.mediaItemCount > 0) return
         if (player.playbackState != Player.STATE_IDLE) return
-        val tasks = repository.dailyTasksFlow.first()
+        
+        val tasks = repository.dailyTasksFlow.firstOrNull() ?: return
         val index = tasks.indexOfFirst { it.uniqueId == savedId }
         if (index == -1) return
+
         audioManager.playTasks(tasks, index, savedPos)
         player.pause()
     }

@@ -85,4 +85,7 @@ interface AudioSourceDao {
 
     @Update
     suspend fun updateSource(source: AudioSourceEntity)
+
+    @Query("DELETE FROM book_mappings WHERE sourceId = :sourceId AND bookName = :bookName")
+    suspend fun deleteMapping(sourceId: Long, bookName: String)
 }

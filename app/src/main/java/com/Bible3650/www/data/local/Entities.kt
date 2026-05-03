@@ -10,8 +10,8 @@ data class DailyTask(
     val listName: String,
     val targetBook: String,
     val targetChapter: Int,
-    val fileUri: String,
-    val isCompleted: Boolean
+    val isCompleted: Boolean,
+    val fileUri: String = ""
 )
 
 @Entity(

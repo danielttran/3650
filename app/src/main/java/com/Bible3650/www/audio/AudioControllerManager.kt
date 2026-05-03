@@ -7,6 +7,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.Bible3650.www.data.BibleRepository
 import com.Bible3650.www.data.local.DailyTask
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
@@ -17,11 +18,14 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import android.net.Uri
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -31,7 +35,8 @@ private const val KEY_POSITION = "last_position_ms"
 
 @Singleton
 class AudioControllerManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val repository: BibleRepository
 ) {
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private val _player = MutableStateFlow<Player?>(null)
@@ -137,20 +142,52 @@ class AudioControllerManager @Inject constructor(
     fun playTasks(tasks: List<DailyTask>, startIndex: Int = 0, startPositionMs: Long = androidx.media3.common.C.TIME_UNSET) {
         val player = _player.value ?: return
 
-        val mediaItems = tasks.map { task ->
-            MediaItem.Builder()
-                .setMediaId(task.uniqueId)
-                .setRequestMetadata(
-                    MediaItem.RequestMetadata.Builder()
-                        .setMediaUri(Uri.parse(task.fileUri))
-                        .build()
-                )
-                .build()
-        }
+        scope.launch(Dispatchers.IO) {
+            try {
+                // 1. Resolve ONLY the first item to start playing immediately
+                val firstTask = tasks.getOrNull(startIndex) ?: return@launch
+                val activeMappings = repository.audioSourceDao.observeActiveMappings().firstOrNull() ?: emptyList()
+                val mappingsByBook = activeMappings.associateBy { it.bookName }
+                val activeSource   = repository.audioSourceDao.getActiveSource()
+                
+                val folderCache = mutableMapOf<String, List<String>>()
 
-        player.setMediaItems(mediaItems, startIndex, startPositionMs)
-        player.prepare()
-        player.play()
+                fun resolveUri(task: DailyTask): Uri? {
+                    val mapping = mappingsByBook[task.targetBook] ?: return null
+                    if (activeSource == null) return null
+                    val treeUri = Uri.parse(mapping.overrideTreeUri ?: activeSource.rootTreeUri)
+                    return repository.resolveChapterFile(treeUri, mapping.folderDocId, task.targetChapter, folderCache)
+                }
+
+                val firstUri = resolveUri(firstTask)
+
+                withContext(Dispatchers.Main) {
+                    val firstItem = MediaItem.Builder()
+                        .setMediaId(firstTask.uniqueId)
+                        .setUri(firstUri)
+                        .build()
+                    player.setMediaItem(firstItem)
+                    if (startPositionMs != androidx.media3.common.C.TIME_UNSET) player.seekTo(startPositionMs)
+                    player.prepare()
+                    player.play()
+                }
+
+                // 2. Resolve the rest in background and update playlist
+                val allMediaItems = tasks.map { task ->
+                    val uri = if (task.uniqueId == firstTask.uniqueId) firstUri else resolveUri(task)
+                    MediaItem.Builder()
+                        .setMediaId(task.uniqueId)
+                        .setUri(uri)
+                        .build()
+                }
+
+                withContext(Dispatchers.Main) {
+                    player.setMediaItems(allMediaItems, startIndex, player.currentPosition)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("AudioController", "Failed to play tasks", e)
+            }
+        }
     }
 
     fun togglePlayPause() {

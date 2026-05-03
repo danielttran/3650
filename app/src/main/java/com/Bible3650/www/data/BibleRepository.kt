@@ -14,7 +14,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,20 +31,22 @@ class BibleRepository @Inject constructor(
     val dailyTasksFlow: Flow<List<DailyTask>> = combine(
         dao.observeActivePlaylists(),
         audioSourceDao.observeActiveMappings()
-    ) { lists, activeMappings ->
-        val mappingsByBook = activeMappings.associateBy { it.bookName }
-        val activeSource   = audioSourceDao.getActiveSource()
+    ) { lists, _ ->
         val allTasks = mutableListOf<DailyTask>()
         for (offset in 0 until 30) {
             lists.forEach { listData ->
-                allTasks.add(resolveDailyTask(listData, offset, mappingsByBook, activeSource))
+                allTasks.add(resolveDailyTask(listData, offset))
             }
         }
         allTasks
     }.flowOn(Dispatchers.IO)
 
     suspend fun initializeDatabaseIfNeeded() {
-        if (dao.observeActivePlaylists().first().isNotEmpty()) return
+        val hasData = withTimeoutOrNull(3000) {
+            dao.observeActivePlaylists().first { it.isNotEmpty() }
+        } != null
+        if (hasData) return
+
         val standardLists = listOf(
             "List 1: Gospels"                       to listOf("Matthew", "Mark", "Luke", "John"),
             "List 2: Pentateuch"                    to listOf("Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy"),
@@ -66,13 +70,22 @@ class BibleRepository @Inject constructor(
 
     private fun resolveDailyTask(
         listData: ListWithBooks,
-        dayOffset: Int,
-        mappingsByBook: Map<String, BookMappingEntity>,
-        activeSource: AudioSourceEntity?
+        dayOffset: Int
     ): DailyTask {
         val books = listData.books.sortedBy { it.sortOrder }
         val totalChapters = books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
-        require(totalChapters > 0) { "List ${listData.readingList.listId} has 0 chapters." }
+        
+        if (books.isEmpty() || totalChapters == 0) {
+            return DailyTask(
+                listId        = listData.readingList.listId,
+                dayOffset     = dayOffset,
+                uniqueId      = "${listData.readingList.listId}_$dayOffset",
+                listName      = listData.readingList.listName,
+                targetBook    = "Empty",
+                targetChapter = 0,
+                isCompleted   = listData.readingList.isCompletedToday
+            )
+        }
 
         var normalizedDay = ((listData.readingList.currentDayIndex + dayOffset - 1) % totalChapters) + 1
         var targetBook    = ""
@@ -83,12 +96,6 @@ class BibleRepository @Inject constructor(
             normalizedDay -= count
         }
 
-        val mapping  = mappingsByBook[targetBook]
-        val fileUri  = if (mapping != null && activeSource != null) {
-            val treeUri = Uri.parse(mapping.overrideTreeUri ?: activeSource.rootTreeUri)
-            resolveChapterFile(treeUri, mapping.folderDocId, targetChapter)?.toString() ?: ""
-        } else ""
-
         return DailyTask(
             listId        = listData.readingList.listId,
             dayOffset     = dayOffset,
@@ -96,44 +103,74 @@ class BibleRepository @Inject constructor(
             listName      = listData.readingList.listName,
             targetBook    = targetBook,
             targetChapter = targetChapter,
-            fileUri       = fileUri,
             isCompleted   = listData.readingList.isCompletedToday
         )
     }
 
     // Returns the content URI for the Nth audio file (1-based) inside a SAF folder,
     // sorted with natural (numeric) ordering so "Chapter 10" follows "Chapter 9".
-    fun resolveChapterFile(treeUri: Uri, folderDocId: String, chapterIndex: Int): Uri? {
-        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, folderDocId)
-        val files = mutableListOf<Pair<String, String>>() // (displayName, docId)
+    fun resolveChapterFile(
+        treeUri: Uri, 
+        folderDocId: String, 
+        chapterIndex: Int,
+        cache: MutableMap<String, List<String>>? = null
+    ): Uri? {
+        val cachedFiles = cache?.get(folderDocId)
+        val sortedDocIds = if (cachedFiles != null) {
+            cachedFiles
+        } else {
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, folderDocId)
+            val files = mutableListOf<Pair<String, String>>() // (displayName, docId)
 
-        try {
-            contentResolver.query(
-                childrenUri,
-                arrayOf(
-                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                    DocumentsContract.Document.COLUMN_MIME_TYPE
-                ),
-                null, null, null
-            )?.use { cursor ->
-                val nameIdx = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                val idIdx   = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                val mimeIdx = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
-                while (cursor.moveToNext()) {
-                    val name  = cursor.getString(nameIdx)  ?: continue
-                    val docId = cursor.getString(idIdx)    ?: continue
-                    val mime  = cursor.getString(mimeIdx)  ?: ""
-                    if (mime.startsWith("audio/") || name.endsWithAudioExt()) files.add(name to docId)
+            try {
+                contentResolver.query(
+                    childrenUri,
+                    arrayOf(
+                        DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                        DocumentsContract.Document.COLUMN_MIME_TYPE
+                    ),
+                    null, null, null
+                )?.use { cursor ->
+                    val nameIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                    val idIdx   = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                    val mimeIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                    
+                    if (nameIdx == -1 || idIdx == -1 || mimeIdx == -1) {
+                        android.util.Log.e("BibleRepo", "Required columns missing in query")
+                        return@use
+                    }
+
+                    while (cursor.moveToNext()) {
+                        val name  = cursor.getString(nameIdx)  ?: continue
+                        val docId = cursor.getString(idIdx)    ?: continue
+                        val mime  = cursor.getString(mimeIdx)  ?: ""
+                        if (mime.startsWith("audio/") || name.endsWithAudioExt()) files.add(name to docId)
+                    }
                 }
+            } catch (e: Exception) {
+                android.util.Log.e("BibleRepo", "resolveChapterFile failed for $folderDocId ch$chapterIndex. Tree: $treeUri", e)
+                return null
             }
-        } catch (e: Exception) {
-            android.util.Log.e("BibleRepo", "resolveChapterFile failed for $folderDocId ch$chapterIndex", e)
-            return null
+
+            if (files.isEmpty()) {
+                android.util.Log.w("BibleRepo", "No audio files found in $folderDocId")
+                val empty = emptyList<String>()
+                cache?.put(folderDocId, empty)
+                empty
+            } else {
+                files.sortWith(Comparator { a, b -> naturalCompare(a.first, b.first) })
+                val docIds = files.map { it.second }
+                cache?.put(folderDocId, docIds)
+                docIds
+            }
         }
 
-        files.sortWith(Comparator { a, b -> naturalCompare(a.first, b.first) })
-        val docId = files.getOrNull(chapterIndex - 1)?.second ?: return null
+        val docId = sortedDocIds.getOrNull(chapterIndex - 1)
+        if (docId == null) {
+            android.util.Log.w("BibleRepo", "Chapter $chapterIndex out of bounds for $folderDocId (total ${sortedDocIds.size})")
+            return null
+        }
         return DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
     }
 

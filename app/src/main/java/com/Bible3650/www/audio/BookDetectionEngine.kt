@@ -20,7 +20,7 @@ data class DetectionResult(
 class BookDetectionEngine @Inject constructor(
     private val contentResolver: ContentResolver
 ) {
-    private data class FolderInfo(val displayName: String, val docId: String, val mp3Count: Int)
+    private data class FolderInfo(val displayName: String, val docId: String, val mp3Count: Int, val normalizedName: String)
 
     // ---------------------------------------------------------------------------
     // Alias table — all entries lowercase, no punctuation.
@@ -104,20 +104,40 @@ class BookDetectionEngine @Inject constructor(
     // ---------------------------------------------------------------------------
 
     fun detect(rootTreeUri: Uri): List<DetectionResult> {
-        val rootDocId = DocumentsContract.getTreeDocumentId(rootTreeUri)
+        val rootDocId = try {
+            DocumentsContract.getTreeDocumentId(rootTreeUri)
+        } catch (e: Exception) {
+            android.util.Log.e("BookDetection", "Invalid tree URI: $rootTreeUri", e)
+            return BibleRegistry.getAllBooks().map { DetectionResult(it, null, 0f, 0) }
+        }
+
+        // Try to get the actual folder name for scoring
+        val rootName = try {
+            val rootDocumentUri = DocumentsContract.buildDocumentUriUsingTree(rootTreeUri, rootDocId)
+            contentResolver.query(rootDocumentUri, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else "Audio Bible"
+            } ?: "Audio Bible"
+        } catch (e: Exception) { 
+            android.util.Log.w("BookDetection", "Could not query root folder name", e)
+            "Audio Bible" 
+        }
+        
         val leafFolders = mutableListOf<FolderInfo>()
-        collectLeafFolders(rootTreeUri, rootDocId, "root", leafFolders, depth = 0)
+        collectLeafFolders(rootTreeUri, rootDocId, rootName, leafFolders, depth = 0)
 
         if (leafFolders.isEmpty()) {
             return BibleRegistry.getAllBooks().map { DetectionResult(it, null, 0f, 0) }
         }
 
+        // Pre-fetch all books once
+        val allBooks = BibleRegistry.getAllBooks()
+
         // Score every (folder, book) combination
         data class Candidate(val folder: FolderInfo, val bookName: String, val score: Float)
         val candidates = mutableListOf<Candidate>()
         for (folder in leafFolders) {
-            for (bookName in BibleRegistry.getAllBooks()) {
-                val score = computeScore(folder.displayName, bookName, folder.mp3Count)
+            for (bookName in allBooks) {
+                val score = computeScore(folder.normalizedName, bookName, folder.mp3Count)
                 if (score > 0.3f) candidates.add(Candidate(folder, bookName, score))
             }
         }
@@ -132,7 +152,7 @@ class BookDetectionEngine @Inject constructor(
             }
         }
 
-        return BibleRegistry.getAllBooks().map { bookName ->
+        return allBooks.map { bookName ->
             val a = assignments[bookName]
             if (a != null) {
                 DetectionResult(bookName, a.folder.docId, a.score, a.folder.mp3Count, a.folder.displayName)
@@ -169,9 +189,14 @@ class BookDetectionEngine @Inject constructor(
                 ),
                 null, null, null
             )?.use { cursor ->
-                val nameIdx = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                val idIdx   = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                val mimeIdx = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                val nameIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val idIdx   = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val mimeIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+
+                if (nameIdx == -1 || idIdx == -1 || mimeIdx == -1) {
+                    android.util.Log.e("BookDetection", "Required columns missing in query")
+                    return@use
+                }
 
                 while (cursor.moveToNext()) {
                     val name = cursor.getString(nameIdx) ?: continue
@@ -190,7 +215,13 @@ class BookDetectionEngine @Inject constructor(
             return
         }
 
-        if (audioCount > 0) result.add(FolderInfo(dirName, dirDocId, audioCount))
+        if (audioCount > 0) {
+            val normalized = dirName.lowercase()
+                .replace(Regex("[_\\-./\\\\]"), " ")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+            result.add(FolderInfo(dirName, dirDocId, audioCount, normalized))
+        }
 
         for ((subName, subDocId) in subDirs) {
             collectLeafFolders(treeUri, subDocId, subName, result, depth + 1)
@@ -208,19 +239,14 @@ class BookDetectionEngine @Inject constructor(
     // Scoring
     // ---------------------------------------------------------------------------
 
-    private fun computeScore(folderName: String, bookName: String, fileCount: Int): Float {
-        val normalized = folderName.lowercase()
-            .replace(Regex("[_\\-./\\\\]"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-
+    private fun computeScore(normalizedFolder: String, bookName: String, fileCount: Int): Float {
         val bookAliases = aliases[bookName] ?: return 0f
-        val folderNoSpaces = normalized.replace(" ", "")
+        val folderNoSpaces = normalizedFolder.replace(" ", "")
 
         var bestNameScore = 0f
         // Try longest alias first so "1 corinthians" beats "cor"
         for (alias in bookAliases.sortedByDescending { it.length }) {
-            if (aliasMatches(normalized, alias)) {
+            if (aliasMatches(normalizedFolder, alias)) {
                 val aliasLen = alias.replace(" ", "").length.toFloat()
                 val folderLen = folderNoSpaces.length.coerceAtLeast(1).toFloat()
                 bestNameScore = maxOf(bestNameScore, 0.4f + (aliasLen / folderLen) * 0.3f)
@@ -231,10 +257,10 @@ class BookDetectionEngine @Inject constructor(
 
         val expected = BibleRegistry.getChapterCount(bookName)
         val chapterBonus = when {
-            fileCount == expected              -> 0.30f
-            abs(fileCount - expected) <= 2    -> 0.15f
-            fileCount in 1..(expected + 5)    -> 0.05f
-            else                              -> 0f
+            fileCount == expected           -> 0.30f
+            abs(fileCount - expected) <= 2  -> 0.15f
+            fileCount in 1..(expected + 5)  -> 0.05f
+            else                            -> 0f
         }
 
         return (bestNameScore + chapterBonus).coerceIn(0f, 1f)

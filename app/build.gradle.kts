@@ -5,6 +5,10 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+kotlin {
+    jvmToolchain(17)
+}
+
 android {
     namespace = "com.Bible3650.www"
     compileSdk = 35
@@ -64,6 +68,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
 
     // Hilt
     implementation(libs.hilt.android)

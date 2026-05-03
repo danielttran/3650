@@ -69,7 +69,7 @@ fun HomeScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         groupedTasks.forEach { (dayOffset, tasks) ->
-                            stickyHeader {
+                            stickyHeader(key = "header_$dayOffset") {
                                 Surface(
                                     color = MaterialTheme.colorScheme.background.copy(alpha = 0.95f), 
                                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
@@ -83,7 +83,7 @@ fun HomeScreen(
                                     )
                                 }
                             }
-                            items(tasks, key = { it.id }) { task ->
+                            items(tasks, key = { "daySec_${dayOffset}_list_${it.listId}_task_${it.id}" }) { task ->
                                 ListEntryItem(
                                     task = task,
                                     onPlayClick = {

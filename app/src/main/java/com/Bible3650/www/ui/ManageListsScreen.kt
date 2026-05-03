@@ -119,7 +119,7 @@ fun ManageListsScreen(
             // ----------------------------------------------------------------
             // Audio Sources section
             // ----------------------------------------------------------------
-            item {
+            item(key = "sources_title") {
                 Text(
                     "Audio Sources",
                     style = MaterialTheme.typography.titleLarge,
@@ -129,7 +129,7 @@ fun ManageListsScreen(
             }
 
             if (detectionState is DetectionState.Running) {
-                item {
+                item(key = "detection_running") {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Row(
                             modifier = Modifier.padding(16.dp),
@@ -144,7 +144,7 @@ fun ManageListsScreen(
             }
 
             if (detectionState is DetectionState.Error) {
-                item {
+                item(key = "detection_error") {
                     Card(
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.errorContainer
@@ -161,7 +161,7 @@ fun ManageListsScreen(
                 }
             }
 
-            items(sources, key = { it.source.sourceId }) { swm ->
+            items(sources, key = { "source_${it.source.sourceId}" }) { swm ->
                 SourceCard(
                     swm         = swm,
                     onMakeActive = { sourceViewModel.switchSource(swm.source) },
@@ -170,7 +170,7 @@ fun ManageListsScreen(
                 )
             }
 
-            item {
+            item(key = "browse_button") {
                 OutlinedButton(
                     onClick = { folderPickerLauncher.launch(null) },
                     modifier = Modifier.fillMaxWidth(),
@@ -187,7 +187,7 @@ fun ManageListsScreen(
             // ----------------------------------------------------------------
             // Reading Lists section
             // ----------------------------------------------------------------
-            item {
+            item(key = "lists_title") {
                 HorizontalDivider()
                 Spacer(Modifier.height(8.dp))
                 Text(
@@ -198,8 +198,8 @@ fun ManageListsScreen(
                 Spacer(Modifier.height(8.dp))
             }
 
-            if (missingBooks.isNotEmpty()) {
-                item {
+            if (lists.isNotEmpty() && missingBooks.isNotEmpty()) {
+                item(key = "missing_books_warning") {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
@@ -224,7 +224,7 @@ fun ManageListsScreen(
                 }
             }
 
-            items(lists, key = { it.readingList.listId }) { listData ->
+            items(lists, key = { "list_${it.readingList.listId}" }) { listData ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -335,7 +335,7 @@ fun ManageListsScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            items(selectedBooks) { book ->
+                            items(selectedBooks, key = { "selected_$it" }) { book ->
                                 InputChip(
                                     selected = true,
                                     onClick = { selectedBooks = selectedBooks.filter { it != book } },
@@ -361,7 +361,7 @@ fun ManageListsScreen(
                             modifier = Modifier.fillMaxWidth().weight(1f),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            items(available) { book ->
+                            items(available, key = { "available_$it" }) { book ->
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()

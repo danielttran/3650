@@ -66,7 +66,7 @@ fun ProfileScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            items(uiState.bookStats) { stat ->
+            items(uiState.bookStats, key = { it.bookName }) { stat ->
                 Card(
                     shape = RoundedCornerShape(8.dp),
                     colors = CardDefaults.cardColors(

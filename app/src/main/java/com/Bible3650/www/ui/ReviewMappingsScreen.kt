@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.Bible3650.www.data.BibleRegistry
 import com.Bible3650.www.data.local.AudioSourceDao
@@ -92,7 +93,13 @@ class ReviewMappingsViewModel @Inject constructor(
     // Called after the user manually picks a folder for a specific book.
     // The picked treeUri is both the permission root and the folder itself.
     fun onManualBookFolderPicked(bookName: String, treeUri: Uri, fileCount: Int) {
-        val docId = DocumentsContract.getTreeDocumentId(treeUri)
+        val docId = try {
+            DocumentsContract.getTreeDocumentId(treeUri)
+        } catch (e: Exception) {
+            android.util.Log.e("ReviewMappings", "Failed to get docId for $treeUri", e)
+            return
+        }
+
         viewModelScope.launch {
             dao.upsertMapping(
                 BookMappingEntity(
@@ -133,7 +140,9 @@ fun ReviewMappingsScreen(
     ) { uri ->
         if (uri != null && pendingBook != null) {
             context.contentResolver.takePersistableUriPermission(
-                uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                uri,
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
             // Count audio files in the picked folder to confirm it's the right one
             val fileCount = countAudioFilesInTree(context.contentResolver, uri)
@@ -288,8 +297,3 @@ private fun countAudioFilesInTree(resolver: android.content.ContentResolver, tre
     } catch (_: Exception) {}
     return count
 }
-
-// Needed because collectAsStateWithLifecycle isn't imported at file scope here
-@Composable
-private fun <T> StateFlow<T>.collectAsStateWithLifecycle(): State<T> =
-    androidx.lifecycle.compose.collectAsStateWithLifecycle()

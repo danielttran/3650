@@ -9,11 +9,13 @@ import com.Bible3650.www.data.local.AudioSourceEntity
 import com.Bible3650.www.data.local.BookMappingEntity
 import com.Bible3650.www.data.local.SourceWithMappings
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 sealed interface DetectionState {
@@ -40,32 +42,40 @@ class SourceManagerViewModel @Inject constructor(
         viewModelScope.launch {
             _detectionState.value = DetectionState.Running
             try {
-                val results = engine.detect(treeUri)
-
-                val sourceId = dao.insertSource(
-                    AudioSourceEntity(
-                        displayName  = suggestedName,
-                        rootTreeUri  = treeUri.toString(),
-                        isActive     = dao.getActiveSource() == null // auto-activate first source
-                    )
-                )
-
-                val mappings = results.mapNotNull { r ->
-                    if (r.folderDocId != null) {
-                        BookMappingEntity(
-                            sourceId   = sourceId,
-                            bookName   = r.bookName,
-                            folderDocId = r.folderDocId,
-                            confidence = r.confidence,
-                            fileCount  = r.fileCount
-                        )
-                    } else null
+                val results = withContext(Dispatchers.IO) {
+                    engine.detect(treeUri)
                 }
-                dao.upsertMappings(mappings)
+
+                val sourceId = withContext(Dispatchers.IO) {
+                    val active = dao.getActiveSource()
+                    dao.insertSource(
+                        AudioSourceEntity(
+                            displayName  = suggestedName,
+                            rootTreeUri  = treeUri.toString(),
+                            isActive     = active == null // auto-activate first source
+                        )
+                    )
+                }
+
+                withContext(Dispatchers.IO) {
+                    val mappings = results.mapNotNull { r ->
+                        if (r.folderDocId != null) {
+                            BookMappingEntity(
+                                sourceId   = sourceId,
+                                bookName   = r.bookName,
+                                folderDocId = r.folderDocId,
+                                confidence = r.confidence,
+                                fileCount  = r.fileCount
+                            )
+                        } else null
+                    }
+                    dao.upsertMappings(mappings)
+                }
 
                 _detectionState.value = DetectionState.Done(sourceId)
             } catch (e: Exception) {
-                _detectionState.value = DetectionState.Error(e.message ?: "Unknown error")
+                android.util.Log.e("SourceManager", "Error adding source", e)
+                _detectionState.value = DetectionState.Error(e.localizedMessage ?: "Unknown error")
             }
         }
     }
