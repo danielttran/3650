@@ -22,8 +22,7 @@ data class TaskUiModel(
     val title: String,
     val subtitle: String,
     val fileUri: String,
-    val isCompleted: Boolean,
-    val isPlaying: Boolean
+    val isCompleted: Boolean
 )
 
 sealed interface DashboardUiState {
@@ -45,12 +44,14 @@ class DashboardViewModel @Inject constructor(
     private val audioManager: AudioControllerManager
 ) : ViewModel() {
 
+    // currentMediaId is exposed separately so the UI can derive isPlaying per-item
+    // without triggering a full re-map of all tasks on every track transition.
+    val currentMediaId: StateFlow<String?> = audioManager.currentMediaId
+
     val uiState: StateFlow<DashboardUiState> = combine(
         repository.dailyTasksFlow,
-        audioManager.currentMediaId,
         repository.audioSourceDao.observeActiveMappings()
-    ) { tasks, playingId, activeMappings ->
-        // If there are no mappings at all, no source has been linked yet
+    ) { tasks, activeMappings ->
         if (activeMappings.isEmpty()) return@combine DashboardUiState.NoSource
 
         val mappedTasks = tasks.map { task ->
@@ -61,8 +62,7 @@ class DashboardViewModel @Inject constructor(
                 title       = task.listName,
                 subtitle    = "${task.targetBook} ${task.targetChapter}",
                 fileUri     = task.fileUri,
-                isCompleted = task.isCompleted,
-                isPlaying   = task.uniqueId == playingId
+                isCompleted = task.isCompleted
             )
         }
         DashboardUiState.Active(mappedTasks)
@@ -72,6 +72,7 @@ class DashboardViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.initializeDatabaseIfNeeded()
+                repository.advanceDayIfNeeded()
                 withContext(Dispatchers.Main) {
                     tryRestorePlayback()
                 }
@@ -115,6 +116,9 @@ class DashboardViewModel @Inject constructor(
         player.pause()
     }
 
+    /** Extend the scrollable day-window so the home list grows as needed. */
+    fun loadMoreDays() = repository.expandWindow()
+
     fun dispatchAction(action: DashboardAction) {
         android.util.Log.d("DashboardVM", "Dispatching action: $action")
         when (action) {
@@ -125,8 +129,25 @@ class DashboardViewModel @Inject constructor(
                 if (uiState.value !is DashboardUiState.Active) return
                 viewModelScope.launch {
                     val tasks = repository.dailyTasksFlow.first()
-                    val index = tasks.indexOfFirst { it.uniqueId == action.taskId }
-                    if (index != -1) audioManager.playTasks(tasks, index)
+                    val startIndex = tasks.indexOfFirst { it.uniqueId == action.taskId }
+                    if (startIndex == -1) return@launch
+
+                    if (tasks[startIndex].dayOffset == 0) {
+                        // Reorder so ALL of today's tasks are played before any future-day
+                        // tasks, starting from the tapped list and wrapping around.
+                        // Without this, lists that appear before the tapped list in the
+                        // array are placed in the "before" block and skipped during
+                        // forward auto-play, leaving those lists unadvanced.
+                        val todayTasks  = tasks.filter { it.dayOffset == 0 }
+                        val todayStart  = todayTasks.indexOfFirst { it.uniqueId == action.taskId }
+                        val futureTasks = tasks.filter { it.dayOffset > 0 }
+                        val playlist    = todayTasks.drop(todayStart) +
+                                          todayTasks.take(todayStart) +
+                                          futureTasks
+                        audioManager.playTasks(playlist, 0)
+                    } else {
+                        audioManager.playTasks(tasks, startIndex)
+                    }
                 }
             }
             is DashboardAction.PlayPause -> audioManager.togglePlayPause()

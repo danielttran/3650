@@ -1,6 +1,8 @@
 package com.Bible3650.www.data
 
 import android.content.ContentResolver
+import android.content.Context
+import android.content.SharedPreferences
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.core.net.toUri
@@ -11,9 +13,11 @@ import com.Bible3650.www.data.local.BookMappingEntity
 import com.Bible3650.www.data.local.DailyTask
 import com.Bible3650.www.data.local.ListWithBooks
 import com.Bible3650.www.data.local.ReadingListEntity
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withTimeoutOrNull
+import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,26 +25,42 @@ import javax.inject.Singleton
 class BibleRepository @Inject constructor(
     val dao: BibleDao,
     val audioSourceDao: AudioSourceDao,
-    private val contentResolver: ContentResolver
+    private val contentResolver: ContentResolver,
+    @ApplicationContext context: Context
 ) {
-    private val folderCache = mutableMapOf<String, List<String>>()
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("bible_repo_state", Context.MODE_PRIVATE)
 
-    // Reacts to both reading-list changes and active-source changes so the
-    // player always uses the currently selected audio source.
+    suspend fun advanceDayIfNeeded() {
+        val today = LocalDate.now().toEpochDay()
+        val lastOpened = prefs.getLong("last_opened_day", -1L)
+        if (lastOpened < today) {
+            dao.atomicAdvanceDay()
+            prefs.edit().putLong("last_opened_day", today).apply()
+        }
+    }
+
+    // Shared cache of folder→sorted-docIds so both dailyTasksFlow and
+    // playTasks benefit from the same one-time directory scan.
+    internal val folderCache = mutableMapOf<String, List<String>>()
+
+    private val _requestedWindowDays = MutableStateFlow(30)
+
+    /** Expand the visible day-window by [increment] days. */
+    fun expandWindow(increment: Int = 30) {
+        _requestedWindowDays.update { it + increment }
+    }
+
     val dailyTasksFlow: Flow<List<DailyTask>> = combine(
         dao.observeActivePlaylists(),
-        audioSourceDao.observeActiveMappings()
-    ) { lists, activeMappings ->
-        // We only clear the cache if the active mappings (folders) have changed
-        // This is a simple heuristic: if the number of mappings changed or the contentResolver is queried
-        // for a new source. For now, clearing it only when the overall source changes is better.
-        // For simplicity, we can clear it if the activeMappings set is different.
-
+        audioSourceDao.observeActiveMappings(),
+        _requestedWindowDays
+    ) { lists, activeMappings, windowDays ->
         val mappingsByBook = activeMappings.associateBy { it.bookName }
         val activeSource   = audioSourceDao.getActiveSource()
-        
+
         val allTasks = mutableListOf<DailyTask>()
-        for (offset in 0 until 30) {
+        for (offset in 0 until windowDays) {
             lists.forEach { listData ->
                 allTasks.add(resolveDailyTask(listData, offset, mappingsByBook, activeSource))
             }
@@ -97,7 +117,7 @@ class BibleRepository @Inject constructor(
                 listName      = listData.readingList.listName,
                 targetBook    = "Empty",
                 targetChapter = 0,
-                isCompleted   = listData.readingList.isCompletedToday
+                isCompleted   = dayOffset == 0 && listData.readingList.isCompletedToday
             )
         }
 
@@ -124,7 +144,7 @@ class BibleRepository @Inject constructor(
             targetBook    = targetBook,
             targetChapter = targetChapter,
             fileUri       = fileUri,
-            isCompleted   = listData.readingList.isCompletedToday
+            isCompleted   = dayOffset == 0 && listData.readingList.isCompletedToday
         )
     }
 
