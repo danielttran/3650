@@ -25,6 +25,13 @@ import javax.inject.Singleton
 
 private const val MAX_FOLDER_CACHE_ENTRIES = 100
 
+// ARGB Int values matching ListColorPalette in the UI layer (avoids importing Compose in data layer)
+private val DEFAULT_LIST_COLOR_INTS = listOf(
+    0xFFCFE2F3.toInt(), 0xFFD5E8D4.toInt(), 0xFFFFE6CC.toInt(), 0xFFE1D5E7.toInt(),
+    0xFFFFF2CC.toInt(), 0xFFF8D7DA.toInt(), 0xFFD4EDDA.toInt(), 0xFFFDE8D4.toInt(),
+    0xFFD1ECF1.toInt(), 0xFFE8D5E0.toInt(), 0xFFD5E5F5.toInt(), 0xFFF5ECD7.toInt(),
+)
+
 @Singleton
 class BibleRepository @Inject constructor(
     val dao: BibleDao,
@@ -41,15 +48,21 @@ class BibleRepository @Inject constructor(
         // Freeze unresolved daily tasks outside the flow transform to avoid DB writes
         // inside a reactive pipeline (which would trigger immediate re-emission cycles).
         repoScope.launch {
-            dao.observeActivePlaylists().collect { lists ->
-                lists.forEach { listData ->
-                    val list = listData.readingList
-                    if (list.activeBook == null || list.activeChapter == null) {
-                        val result = calculateTargetTask(listData, 0)
-                        dao.updateListProgress(list.listId, list.currentDayIndex, result.first, result.second)
+            dao.observeActivePlaylists()
+                .catch { e -> android.util.Log.e("BibleRepo", "Freeze observer failed", e) }
+                .collect { lists ->
+                    lists.forEach { listData ->
+                        val list = listData.readingList
+                        if (list.activeBook == null || list.activeChapter == null) {
+                            try {
+                                val result = calculateTargetTask(listData, 0)
+                                dao.updateListProgress(list.listId, list.currentDayIndex, result.first, result.second)
+                            } catch (e: Exception) {
+                                android.util.Log.e("BibleRepo", "Failed to freeze task for list ${list.listId}", e)
+                            }
+                        }
                     }
                 }
-            }
         }
     }
 
@@ -93,7 +106,8 @@ class BibleRepository @Inject constructor(
             "List 10: Acts"                         to listOf("Acts")
         )
         standardLists.forEachIndexed { index, (name, books) ->
-            dao.createCustomList(ReadingListEntity(listName = name, listOrder = index), books)
+            val color = DEFAULT_LIST_COLOR_INTS.getOrElse(index) { 0 }
+            dao.createCustomList(ReadingListEntity(listName = name, listOrder = index, listColor = color), books)
         }
     }
 

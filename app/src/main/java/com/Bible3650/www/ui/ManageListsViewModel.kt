@@ -41,10 +41,13 @@ class ManageListsViewModel @Inject constructor(
         }
     }
 
-    fun createList(name: String, books: List<String>) {
+    fun createList(name: String, books: List<String>, colorArgb: Int) {
         viewModelScope.launch {
             try {
-                repository.dao.createCustomList(ReadingListEntity(listName = name), books)
+                repository.dao.createCustomList(
+                    ReadingListEntity(listName = name, listColor = colorArgb),
+                    books
+                )
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error creating list", e)
             }

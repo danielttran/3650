@@ -15,8 +15,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -40,15 +40,14 @@ fun HomeScreen(
                 ) {
                     Text(
                         "No audio source linked",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        style = MaterialTheme.typography.titleMedium
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         "Go to Lists → Audio Sources and browse to a folder containing your audio Bible files.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        textAlign = TextAlign.Center
                     )
                 }
             }
@@ -97,7 +96,7 @@ fun HomeScreen(
                 }
 
                 // MiniPlayerBar is its own composable so that currentPosition / duration
-                // updates (every ~1 s) only recompose the bar, not the entire screen.
+                // updates only recompose the bar, not the entire screen.
                 MiniPlayerBar(
                     playingTask = playingTask,
                     viewModel = viewModel,
@@ -133,9 +132,7 @@ private fun MiniPlayerBar(
         Column {
             LinearProgressIndicator(
                 progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp),
+                modifier = Modifier.fillMaxWidth().height(6.dp),
                 color = MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
             )
@@ -154,7 +151,7 @@ private fun MiniPlayerBar(
                         maxLines = 1
                     )
                     Text(
-                        playingTask?.subtitle ?: "Playing...",
+                        playingTask?.subtitle ?: "Playing…",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
@@ -240,7 +237,6 @@ fun ListEntryItem(
                         Text(
                             text = "${task.title} (${task.totalChapters})",
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
                             color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                         )
                         if (isPlaying) {
@@ -262,18 +258,12 @@ fun ListEntryItem(
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onDecrement) {
-                        Icon(
-                            Icons.Default.ChevronLeft,
-                            contentDescription = "Previous",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
+                        Icon(Icons.Default.ChevronLeft, contentDescription = "Previous",
+                             tint = MaterialTheme.colorScheme.primary)
                     }
                     IconButton(onClick = onIncrement) {
-                        Icon(
-                            Icons.Default.ChevronRight,
-                            contentDescription = "Next",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
+                        Icon(Icons.Default.ChevronRight, contentDescription = "Next",
+                             tint = MaterialTheme.colorScheme.primary)
                     }
                 }
             }

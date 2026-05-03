@@ -4,14 +4,15 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -36,13 +37,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.Bible3650.www.data.BibleRegistry
 import com.Bible3650.www.data.local.AudioSourceEntity
+import androidx.compose.ui.graphics.toArgb
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ManageListsScreen(
     viewModel: ManageListsViewModel,
     sourceViewModel: SourceManagerViewModel = hiltViewModel(),
-    onBackClick: () -> Unit,
     onReviewMappings: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -54,13 +55,12 @@ fun ManageListsScreen(
     var editingList by remember { mutableStateOf<com.Bible3650.www.data.local.ReadingListEntity?>(null) }
     var listNameInput by remember { mutableStateOf("") }
     var selectedBooks by remember { mutableStateOf<List<String>>(emptyList()) }
+    var selectedColor by remember { mutableStateOf(0) }
     var pendingDeleteList by remember { mutableStateOf<com.Bible3650.www.data.local.ReadingListEntity?>(null) }
 
     val validationResults by viewModel.validationResults.collectAsStateWithLifecycle()
-
     val context = LocalContext.current
 
-    // SAF folder picker for adding a new audio source
     val folderPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
@@ -68,7 +68,6 @@ fun ManageListsScreen(
             context.contentResolver.takePersistableUriPermission(
                 uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
-            // Use the last path segment as a suggested name (user can rename later)
             val suggested = uri.lastPathSegment
                 ?.substringAfterLast('/')
                 ?.substringAfterLast(':')
@@ -78,7 +77,6 @@ fun ManageListsScreen(
         }
     }
 
-    // Navigate to review screen once detection finishes
     LaunchedEffect(detectionState) {
         if (detectionState is DetectionState.Done) {
             onReviewMappings((detectionState as DetectionState.Done).sourceId)
@@ -96,6 +94,7 @@ fun ManageListsScreen(
                 )
                 listNameInput = ""
                 selectedBooks = emptyList()
+                selectedColor = nextSuggestedColorArgb(lists.size)
                 showListDialog = true
             }) {
                 Icon(Icons.Default.Add, contentDescription = "Add Reading List")
@@ -104,33 +103,16 @@ fun ManageListsScreen(
     ) { _ ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                    Text(
-                        "Manage Lists",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
             // ----------------------------------------------------------------
             // Audio Sources section
             // ----------------------------------------------------------------
             item(key = "sources_title") {
                 Text(
                     "Audio Sources",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
+                    style = MaterialTheme.typography.titleLarge
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -153,9 +135,7 @@ fun ManageListsScreen(
             if (detectionState is DetectionState.Error) {
                 item(key = "detection_error") {
                     Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer
-                        ),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
@@ -170,7 +150,7 @@ fun ManageListsScreen(
 
             items(sources, key = { "source_${it.source.sourceId}" }) { swm ->
                 SourceCard(
-                    swm         = swm,
+                    swm          = swm,
                     onMakeActive = { sourceViewModel.switchSource(swm.source) },
                     onReview     = { onReviewMappings(swm.source.sourceId) },
                     onDelete     = { sourceViewModel.deleteSource(swm.source) }
@@ -183,12 +163,11 @@ fun ManageListsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = detectionState !is DetectionState.Running
                 ) {
-                    Icon(Icons.Default.FolderOpen, contentDescription = null,
-                         modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Browse for Audio Bible Folder")
                 }
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(8.dp))
             }
 
             // ----------------------------------------------------------------
@@ -196,11 +175,10 @@ fun ManageListsScreen(
             // ----------------------------------------------------------------
             item(key = "lists_title") {
                 HorizontalDivider()
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
                 Text(
                     "Reading Lists",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
+                    style = MaterialTheme.typography.titleLarge
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -210,33 +188,25 @@ fun ManageListsScreen(
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
-                            containerColor = Color(0xFFFFF9C4), // Soft Yellow
-                            contentColor = Color(0xFF5D4037)  // Darker text for readability
+                            containerColor = Color(0xFFFFF9C4),
+                            contentColor = Color(0xFF5D4037)
                         )
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.Warning, contentDescription = "Warning", tint = Color(0xFFFBC02D))
                                 Spacer(Modifier.width(16.dp))
-                                Text("List Configuration Warning", fontWeight = FontWeight.Bold)
+                                Text("List Configuration Warning", style = MaterialTheme.typography.titleSmall)
                             }
-                            
                             if (validationResults.missingBooks.isNotEmpty()) {
                                 Spacer(Modifier.height(8.dp))
-                                Text("Missing Books (${validationResults.missingBooks.size})", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
-                                Text(
-                                    validationResults.missingBooks.joinToString(", "),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
+                                Text("Missing Books (${validationResults.missingBooks.size})", style = MaterialTheme.typography.labelMedium)
+                                Text(validationResults.missingBooks.joinToString(", "), style = MaterialTheme.typography.bodySmall)
                             }
-                            
                             if (validationResults.duplicateBooks.isNotEmpty()) {
                                 Spacer(Modifier.height(8.dp))
-                                Text("Duplicate Books (${validationResults.duplicateBooks.size})", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
-                                Text(
-                                    validationResults.duplicateBooks.joinToString(", "),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
+                                Text("Duplicate Books (${validationResults.duplicateBooks.size})", style = MaterialTheme.typography.labelMedium)
+                                Text(validationResults.duplicateBooks.joinToString(", "), style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -244,22 +214,38 @@ fun ManageListsScreen(
             }
 
             items(lists, key = { "list_${it.readingList.listId}" }) { listData ->
+                val cardColor = if (listData.readingList.listColor != 0)
+                    Color(listData.readingList.listColor).copy(alpha = 0.35f)
+                else
+                    MaterialTheme.colorScheme.surfaceVariant
+
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    colors = CardDefaults.cardColors(containerColor = cardColor)
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Color swatch dot
+                        if (listData.readingList.listColor != 0) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(listData.readingList.listColor))
+                            )
+                            Spacer(Modifier.width(10.dp))
+                        }
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(listData.readingList.listName,
-                                 style = MaterialTheme.typography.titleMedium,
-                                 fontWeight = FontWeight.Bold)
+                            Text(
+                                listData.readingList.listName,
+                                style = MaterialTheme.typography.titleMedium
+                            )
                             Text(
                                 listData.books.sortedBy { it.sortOrder }.joinToString(", ") { it.bookName },
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 2
                             )
@@ -291,6 +277,7 @@ fun ManageListsScreen(
                                 editingList = listData.readingList
                                 listNameInput = listData.readingList.listName
                                 selectedBooks = listData.books.sortedBy { it.sortOrder }.map { it.bookName }
+                                selectedColor = listData.readingList.listColor
                                 showListDialog = true
                             }) {
                                 Icon(Icons.Default.Edit, contentDescription = "Edit")
@@ -350,9 +337,12 @@ fun ManageListsScreen(
                                 onClick = {
                                     if (listNameInput.isNotBlank() && selectedBooks.isNotEmpty()) {
                                         if (editingList?.listId == 0L) {
-                                            viewModel.createList(listNameInput, selectedBooks)
+                                            viewModel.createList(listNameInput, selectedBooks, selectedColor)
                                         } else {
-                                            viewModel.updateList(editingList!!.copy(listName = listNameInput), selectedBooks)
+                                            viewModel.updateList(
+                                                editingList!!.copy(listName = listNameInput, listColor = selectedColor),
+                                                selectedBooks
+                                            )
                                         }
                                         showListDialog = false
                                     }
@@ -371,7 +361,33 @@ fun ManageListsScreen(
                             label = { Text("List Name") },
                             modifier = Modifier.fillMaxWidth()
                         )
-                        Text("Selected Books (Tap to remove):", fontWeight = FontWeight.Bold)
+
+                        // Color picker
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("List Color", style = MaterialTheme.typography.titleSmall)
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                items(ListColorPalette) { color ->
+                                    val argb = color.toArgb()
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(color)
+                                            .border(
+                                                width = if (selectedColor == argb) 3.dp else 1.dp,
+                                                color = if (selectedColor == argb)
+                                                    MaterialTheme.colorScheme.primary
+                                                else
+                                                    MaterialTheme.colorScheme.outlineVariant,
+                                                shape = CircleShape
+                                            )
+                                            .clickable { selectedColor = argb }
+                                    )
+                                }
+                            }
+                        }
+
+                        Text("Selected Books (Tap to remove)", style = MaterialTheme.typography.titleSmall)
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -389,14 +405,16 @@ fun ManageListsScreen(
                             }
                             if (selectedBooks.isEmpty()) {
                                 item {
-                                    Text("No books selected",
-                                         style = MaterialTheme.typography.bodyMedium,
-                                         color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        "No books selected",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                         }
                         HorizontalDivider()
-                        Text("Available Books (Tap to add):", fontWeight = FontWeight.Bold)
+                        Text("Available Books (Tap to add)", style = MaterialTheme.typography.titleSmall)
                         val available = BibleRegistry.getAllBooks().filter { it !in selectedBooks }
                         LazyColumn(
                             modifier = Modifier.fillMaxWidth().weight(1f),
@@ -407,14 +425,15 @@ fun ManageListsScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(8.dp))
-                                        .clickable { 
+                                        .clickable {
                                             if (book !in selectedBooks) {
-                                                selectedBooks = selectedBooks + book 
+                                                selectedBooks = selectedBooks + book
                                             }
                                         },
                                     color = MaterialTheme.colorScheme.surfaceVariant
                                 ) {
-                                    Text(book, modifier = Modifier.padding(16.dp))
+                                    Text(book, modifier = Modifier.padding(16.dp),
+                                         style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
                         }
@@ -455,18 +474,17 @@ private fun SourceCard(
                 Icon(
                     imageVector = if (allMapped) Icons.Filled.CheckCircle else Icons.Default.Warning,
                     contentDescription = null,
-                    tint = if (allMapped) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.error,
+                    tint = if (allMapped) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(swm.source.displayName,
-                         fontWeight = FontWeight.Bold,
-                         style = MaterialTheme.typography.titleMedium)
-                    Text("$mapped / $total books linked",
-                         style = MaterialTheme.typography.bodySmall,
-                         color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(swm.source.displayName, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "$mapped / $total books linked",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 if (swm.source.isActive) {
                     Badge { Text("Active") }

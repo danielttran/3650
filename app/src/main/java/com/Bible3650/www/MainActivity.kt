@@ -110,9 +110,8 @@ fun Bible3650App(dashboardViewModel: DashboardViewModel) {
                         val listsViewModel: ManageListsViewModel = hiltViewModel()
                         val sourceViewModel: SourceManagerViewModel = hiltViewModel()
                         ManageListsScreen(
-                            viewModel       = listsViewModel,
-                            sourceViewModel = sourceViewModel,
-                            onBackClick     = { navController.navigateUp() },
+                            viewModel        = listsViewModel,
+                            sourceViewModel  = sourceViewModel,
                             onReviewMappings = { sourceId ->
                                 navController.navigate("review_mappings/$sourceId")
                             }

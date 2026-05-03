@@ -13,6 +13,7 @@ import com.Bible3650.www.data.local.MIGRATION_3_4
 import com.Bible3650.www.data.local.MIGRATION_4_5
 import com.Bible3650.www.data.local.MIGRATION_5_6
 import com.Bible3650.www.data.local.MIGRATION_6_7
+import com.Bible3650.www.data.local.MIGRATION_7_8
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -34,7 +35,7 @@ abstract class AppModule {
         @Singleton
         fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "bible_database")
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 .build()
 
         @Provides

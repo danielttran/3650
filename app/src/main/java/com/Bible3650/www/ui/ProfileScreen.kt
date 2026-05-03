@@ -11,12 +11,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,11 +40,17 @@ fun ProfileScreen(
     ) { uri ->
         uri?.let {
             scope.launch {
-                val json = viewModel.exportData()
-                context.contentResolver.openOutputStream(it)?.use { stream ->
-                    stream.write(json.toByteArray())
+                try {
+                    val json = viewModel.exportData()
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(it)?.use { stream ->
+                            stream.write(json.toByteArray())
+                        }
+                    }
+                    snackbarHostState.showSnackbar("Progress exported successfully")
+                } catch (e: Exception) {
+                    snackbarHostState.showSnackbar("Export failed")
                 }
-                snackbarHostState.showSnackbar("Progress exported successfully")
             }
         }
     }
@@ -52,10 +61,16 @@ fun ProfileScreen(
         uri?.let {
             scope.launch {
                 try {
-                    context.contentResolver.openInputStream(it)?.use { stream ->
-                        val json = stream.bufferedReader().readText()
+                    val json = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(it)?.use { stream ->
+                            stream.bufferedReader().readText()
+                        }
+                    }
+                    if (json != null) {
                         pendingImportJson = json
                         showImportConfirm = true
+                    } else {
+                        snackbarHostState.showSnackbar("Failed to read backup file")
                     }
                 } catch (e: Exception) {
                     snackbarHostState.showSnackbar("Failed to read backup file")
@@ -85,7 +100,7 @@ fun ProfileScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "Total Chapters Read",
+                        text = "Total Chapters",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
@@ -148,11 +163,13 @@ fun ProfileScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(uiState.bookStats, key = { it.bookName }) { stat ->
+                    val cardColor = when {
+                        stat.listColor != 0 -> Color(stat.listColor)
+                        else -> MaterialTheme.colorScheme.surfaceVariant
+                    }
                     Card(
                         shape = RoundedCornerShape(8.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (stat.readCount > 0) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                        )
+                        colors = CardDefaults.cardColors(containerColor = cardColor)
                     ) {
                         Column(
                             modifier = Modifier
@@ -163,14 +180,17 @@ fun ProfileScreen(
                             Text(
                                 text = stat.bookName,
                                 style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.SemiBold,
                                 textAlign = TextAlign.Center,
                                 maxLines = 1
                             )
                             Text(
                                 text = "(${stat.readCount})",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (stat.readCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (stat.readCount > 0)
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }

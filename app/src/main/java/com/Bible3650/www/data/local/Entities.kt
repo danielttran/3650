@@ -28,7 +28,9 @@ data class ReadingListEntity(
     @ColumnInfo(name = "manual_offset") val manualOffset: Int = 0,
     // FROZEN STATE: Caches the current task so mid-day list edits don't jar the UI
     @ColumnInfo(name = "active_book") val activeBook: String? = null,
-    @ColumnInfo(name = "active_chapter") val activeChapter: Int? = null
+    @ColumnInfo(name = "active_chapter") val activeChapter: Int? = null,
+    // Color-coding for profile page; stored as ARGB Int (Color.toArgb()); 0 = unset
+    @ColumnInfo(name = "list_color") val listColor: Int = 0
 )
 
 @Entity(
@@ -81,6 +83,9 @@ interface BibleDao {
 
     @Query("UPDATE reading_lists SET manual_offset = :newOffset, active_book = NULL, active_chapter = NULL WHERE listId = :id")
     suspend fun updateManualOffset(id: Long, newOffset: Int)
+
+    @Query("UPDATE reading_lists SET list_color = :color WHERE listId = :id")
+    suspend fun updateListColor(id: Long, color: Int)
 
     @Query("UPDATE reading_lists SET list_order = :order WHERE listId = :id")
     suspend fun updateListOrder(id: Long, order: Int)
