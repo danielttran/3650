@@ -141,7 +141,11 @@ class AudioControllerManager @Inject constructor(
     }
 
     fun playTasks(tasks: List<DailyTask>, startIndex: Int = 0, startPositionMs: Long = androidx.media3.common.C.TIME_UNSET) {
-        val player = _player.value ?: return
+        android.util.Log.d("AudioController", "playTasks: tasks=${tasks.size}, startIndex=$startIndex")
+        val player = _player.value ?: run {
+            android.util.Log.w("AudioController", "playTasks failed: Player is null")
+            return
+        }
 
         scope.launch(Dispatchers.IO) {
             try {
@@ -184,6 +188,11 @@ class AudioControllerManager @Inject constructor(
                     MediaItem.Builder()
                         .setMediaId(task.uniqueId)
                         .setUri(uri)
+                        .setRequestMetadata(
+                            MediaItem.RequestMetadata.Builder()
+                                .setMediaUri(uri)
+                                .build()
+                        )
                         .build()
                 }
 

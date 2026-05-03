@@ -47,11 +47,26 @@ class AudioPlaybackService : MediaLibraryService() {
                 mediaItems: MutableList<MediaItem>
             ): ListenableFuture<MutableList<MediaItem>> {
                 val resolvedItems = mediaItems.map { item ->
-                    item.buildUpon()
-                        .setUri(item.requestMetadata.mediaUri)
-                        .build()
+                    if (item.localConfiguration != null) return@map item
+                    
+                    val uri = item.requestMetadata.mediaUri
+                    if (uri != null) {
+                        item.buildUpon()
+                            .setUri(uri)
+                            .build()
+                    } else {
+                        item
+                    }
                 }.toMutableList()
                 return Futures.immediateFuture(resolvedItems)
+            }
+
+            override fun onPlaybackResumption(
+                mediaSession: MediaSession,
+                controller: MediaSession.ControllerInfo
+            ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+                // Return an empty result if we can't resume
+                return Futures.immediateFailedFuture(UnsupportedOperationException())
             }
         }
 

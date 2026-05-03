@@ -116,6 +116,7 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun dispatchAction(action: DashboardAction) {
+        android.util.Log.d("DashboardVM", "Dispatching action: $action")
         when (action) {
             is DashboardAction.ToggleTask -> viewModelScope.launch {
                 repository.dao.updateTaskStatus(action.listId, action.isChecked)
