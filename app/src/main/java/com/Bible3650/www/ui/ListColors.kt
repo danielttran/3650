@@ -37,5 +37,7 @@ val ListColorPalette: List<Color> = listOf(
 )
 
 /** Returns the ARGB Int to persist for a newly created list at [listIndex]. */
-fun nextSuggestedColorArgb(listIndex: Int): Int =
-    0
+fun nextSuggestedColorArgb(listIndex: Int): Int {
+    val index = listIndex.coerceAtLeast(0) % ListColorPalette.size
+    return ListColorPalette[index].toArgb()
+}

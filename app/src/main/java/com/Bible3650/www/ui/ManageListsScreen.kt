@@ -38,8 +38,10 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.Bible3650.www.data.BibleRegistry
-import com.Bible3650.www.data.local.AudioSourceEntity
+import com.Bible3650.www.domain.PresetPlan
+import com.Bible3650.www.domain.toKey
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.runtime.saveable.rememberSaveable
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,7 +89,11 @@ fun ManageListsScreen(
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
-    var showResetConfirmDialog by remember { mutableStateOf(false) }
+    // Step 1: show preset picker; step 2: confirm selected plan
+    var showResetPickerDialog  by rememberSaveable { mutableStateOf(false) }
+    var showResetConfirmDialog by rememberSaveable { mutableStateOf(false) }
+    var selectedPresetKey by rememberSaveable { mutableStateOf("GrantHorner") }
+    val selectedPreset = remember(selectedPresetKey) { PresetPlan.fromKey(selectedPresetKey) }
 
     LaunchedEffect(viewModel) {
         viewModel.uiEvents.collect { message ->
@@ -113,15 +119,76 @@ fun ManageListsScreen(
             }
         }
     ) { _ ->
+        // ── Step 1: Preset picker ──────────────────────────────────────────────
+        if (showResetPickerDialog) {
+            AlertDialog(
+                onDismissRequest = { showResetPickerDialog = false },
+                title = { Text("Choose a Preset Plan") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Select a plan to restore. All current lists and reading progress will be erased.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        PresetPlan.all().forEach { plan ->
+                            val isSelected = selectedPresetKey == plan.toKey()
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { 
+                                        selectedPresetKey = plan.toKey()
+                                        showResetPickerDialog = false
+                                        showResetConfirmDialog = true
+                                    },
+                                color = if (isSelected)
+                                    MaterialTheme.colorScheme.primaryContainer
+                                else
+                                    MaterialTheme.colorScheme.surfaceVariant,
+                                tonalElevation = if (isSelected) 4.dp else 0.dp
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(
+                                        plan.displayName,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isSelected)
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        else
+                                            MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        plan.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isSelected)
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        else
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { showResetPickerDialog = false }) { Text("Cancel") }
+                }
+            )
+        }
+
+        // ── Step 2: Confirm destructive reset ──────────────────────────────────
         if (showResetConfirmDialog) {
             AlertDialog(
                 onDismissRequest = { showResetConfirmDialog = false },
-                title = { Text("Reset to Default Lists?") },
-                text = { Text("This will delete all custom lists and reading progress, and restore the default reading lists. Your audio source mappings will not be deleted. This cannot be undone.") },
+                title = { Text("Reset to \"${selectedPreset.displayName}\"?") },
+                text = { Text("This will delete all current lists and reading progress, and restore the \"${selectedPreset.displayName}\" plan. Your audio source mappings will not be deleted. This cannot be undone.") },
                 confirmButton = {
                     TextButton(
                         onClick = {
-                            viewModel.resetToDefaults()
+                            viewModel.resetToDefaults(selectedPreset)
                             showResetConfirmDialog = false
                         }
                     ) { Text("Reset", color = MaterialTheme.colorScheme.error) }
@@ -200,7 +267,7 @@ fun ManageListsScreen(
                         Text("Browse Audio")
                     }
                     OutlinedButton(
-                        onClick = { showResetConfirmDialog = true },
+                        onClick = { showResetPickerDialog = true },
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(18.dp))

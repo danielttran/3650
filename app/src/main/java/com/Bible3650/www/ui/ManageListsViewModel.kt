@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.Bible3650.www.domain.PresetPlan
 import javax.inject.Inject
 
 @HiltViewModel
@@ -37,11 +38,11 @@ class ManageListsViewModel @Inject constructor(
     private val _uiEvents = MutableSharedFlow<String>()
     val uiEvents = _uiEvents.asSharedFlow()
 
-    fun resetToDefaults() {
+    fun resetToDefaults(plan: PresetPlan) {
         viewModelScope.launch {
             try {
-                repository.resetToDefaults()
-                _uiEvents.emit("Lists restored to defaults.")
+                repository.resetToDefaults(plan)
+                _uiEvents.emit("Lists restored to \"${plan.displayName}\".")
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error resetting lists", e)
                 _uiEvents.emit("Failed to reset lists.")

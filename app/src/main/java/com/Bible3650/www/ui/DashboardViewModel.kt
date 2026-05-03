@@ -1,7 +1,6 @@
 package com.Bible3650.www.ui
 
 import androidx.compose.runtime.Immutable
-import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
@@ -62,9 +61,11 @@ class DashboardViewModel @Inject constructor(
 
     val uiState: StateFlow<DashboardUiState> = combine(
         repository.dailyTasksFlow,
-        repository.audioSourceDao.observeActiveMappings()
-    ) { tasks, activeMappings ->
-        if (activeMappings.isEmpty()) return@combine DashboardUiState.NoSource
+        repository.hasActiveSourceFlow
+    ) { tasks, hasSource ->
+        // hasActiveSourceFlow shares the same Room query already used by dailyTasksFlow,
+        // so we avoid a duplicate subscription to observeActiveMappings().
+        if (!hasSource) return@combine DashboardUiState.NoSource
 
         val mappedTasks = tasks.map { task ->
             TaskUiModel(
@@ -136,7 +137,11 @@ class DashboardViewModel @Inject constructor(
         if (player.mediaItemCount > 0) return
         if (player.playbackState != Player.STATE_IDLE) return
 
-        val tasks = repository.dailyTasksFlow.firstOrNull() ?: return
+        // Wait for a non-empty task list — firstOrNull() can return an empty list
+        // on the very first Room emission before data is ready, causing index = -1.
+        val tasks = withTimeoutOrNull(3000) {
+            repository.dailyTasksFlow.first { it.isNotEmpty() }
+        } ?: return
         val index = tasks.indexOfFirst { it.uniqueId == savedId }
         if (index == -1) return
 

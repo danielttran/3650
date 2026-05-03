@@ -79,6 +79,9 @@ interface BibleDao {
     @Query("SELECT * FROM reading_lists")
     suspend fun getAllLists(): List<ListWithBooks>
 
+    @Query("SELECT COUNT(*) FROM reading_lists")
+    suspend fun countLists(): Int
+
     @Query("SELECT * FROM reading_lists WHERE listId = :id")
     suspend fun getListById(id: Long): ReadingListEntity?
 
@@ -136,7 +139,8 @@ interface BibleDao {
 
     @Transaction
     suspend fun updateCustomList(list: ReadingListEntity, newBooks: List<String>) {
-        updateList(list)
+        // Clear frozen state so stale book/chapter is never shown after a list edit
+        updateList(list.copy(activeBook = null, activeChapter = null))
         deleteBooksForList(list.listId)
         val bookEntities = newBooks.mapIndexed { index, bookName ->
             ListBookEntity(listId = list.listId, bookName = bookName, sortOrder = index)

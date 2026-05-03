@@ -12,6 +12,7 @@ import com.Bible3650.www.data.local.DailyTask
 import com.Bible3650.www.data.local.ListWithBooks
 import com.Bible3650.www.data.local.ReadingListEntity
 import com.Bible3650.www.domain.DefaultsProvider
+import com.Bible3650.www.domain.PresetPlan
 import com.Bible3650.www.domain.ReadingPlanUseCase
 import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
@@ -22,7 +23,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -45,6 +45,12 @@ class BibleRepository @Inject constructor(
     
     private val resolvedUris = MutableStateFlow<Map<String, String>>(emptyMap())
     private val resolvingTasks = ConcurrentHashMap.newKeySet<String>()
+    // Lifecycle-bound scope for background URI resolution — never leaks like ad-hoc scopes
+    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Emits true when at least one audio source mapping is active. */
+    val hasActiveSourceFlow: Flow<Boolean> =
+        audioSourceDao.observeActiveMappings().map { it.isNotEmpty() }
 
     suspend fun freezeActiveTasks() {
         val lists = dao.getAllLists()
@@ -76,19 +82,15 @@ class BibleRepository @Inject constructor(
 
     val dailyTasksFlow: Flow<List<DailyTask>> = combine(
         dao.observeActivePlaylists(),
-        audioSourceDao.observeActiveMappings(),
         resolvedUris
-    ) { lists, activeMappings, uris ->
-        val mappingsByBook = activeMappings.associateBy { it.bookName }
-        val activeSource   = audioSourceDao.getActiveSource()
-        
+    ) { lists, uris ->
         val tasks = lists.map { listData ->
-            resolveDailyTask(listData, 0, mappingsByBook, activeSource)
+            resolveDailyTask(listData, 0)
         }
         
         val missing = tasks.filter { it.fileUri.isEmpty() && resolvingTasks.add(it.uniqueId) }
         if (missing.isNotEmpty()) {
-            CoroutineScope(Dispatchers.IO).launch {
+            repositoryScope.launch {
                 val newUris = missing.associate { task ->
                     task.uniqueId to getTaskFileUri(task.targetBook, task.targetChapter)
                 }
@@ -111,11 +113,9 @@ class BibleRepository @Inject constructor(
         .flowOn(Dispatchers.IO)
 
     suspend fun initializeDatabaseIfNeeded() {
-        val hasData = withTimeoutOrNull(3000) {
-            dao.observeActivePlaylists().first { it.isNotEmpty() }
-        } != null
-        if (hasData) return
-
+        // Use a direct count query — eliminates the race condition of observing
+        // an empty-first-emission from Room before the DB is fully ready.
+        if (dao.countLists() > 0) return
         insertDefaultLists()
     }
 
@@ -131,9 +131,7 @@ class BibleRepository @Inject constructor(
 
     private suspend fun resolveDailyTask(
         listData: ListWithBooks,
-        dayOffset: Int,
-        mappingsByBook: Map<String, BookMappingEntity>,
-        activeSource: AudioSourceEntity?
+        dayOffset: Int
     ): DailyTask {
         val list = listData.readingList
         val targetBook: String
@@ -244,6 +242,9 @@ class BibleRepository @Inject constructor(
             }
 
             folderCache.evictAll()
+            // Clear stale URI cache so old source paths don't bleed into the restored data
+            resolvedUris.value = emptyMap()
+            resolvingTasks.clear()
             true
         } catch (e: Exception) {
             android.util.Log.e("BibleRepo", "Database restoration failed", e)
@@ -251,11 +252,17 @@ class BibleRepository @Inject constructor(
         }
     }
 
-    suspend fun resetToDefaults() = withContext(Dispatchers.IO) {
+    suspend fun resetToDefaults(plan: PresetPlan = PresetPlan.GrantHorner) = withContext(Dispatchers.IO) {
+        // Clear stale cached URIs so old list IDs don't bleed into the new lists
+        resolvedUris.value = emptyMap()
+        resolvingTasks.clear()
         database.withTransaction {
             dao.clearAllBooks()
             dao.clearAllLists()
-            insertDefaultLists()
+            val lists = DefaultsProvider.listsFor(plan)
+            lists.forEachIndexed { index, (name, books) ->
+                dao.createCustomList(ReadingListEntity(listName = name, listOrder = index, listColor = 0), books)
+            }
         }
         folderCache.evictAll()
     }
