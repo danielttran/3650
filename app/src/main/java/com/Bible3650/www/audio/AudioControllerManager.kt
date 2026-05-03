@@ -91,7 +91,7 @@ class AudioControllerManager @Inject constructor(
                             val pos = p.currentPosition
                             _currentPosition.value = pos
                             _duration.value = p.duration.coerceAtLeast(0L)
-                            if (pos - lastSavedPosition >= 5000L) {
+                            if (pos - lastSavedPosition >= 15000L) { // Throttle slightly more to 15s
                                 prefs.edit().putLong(KEY_POSITION, pos).apply()
                                 lastSavedPosition = pos
                             }
@@ -238,6 +238,8 @@ class AudioControllerManager @Inject constructor(
 
     fun release() {
         scope.cancel()
+        _player.value?.release()
+        _player.value = null
         controllerFuture?.let { MediaController.releaseFuture(it) }
     }
 }

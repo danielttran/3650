@@ -27,6 +27,10 @@ class BibleRepository @Inject constructor(
     // playTasks benefit from the same one-time directory scan.
     internal val folderCache = mutableMapOf<String, List<String>>()
 
+    fun clearCache() {
+        folderCache.clear()
+    }
+
     val dailyTasksFlow: Flow<List<DailyTask>> = combine(
         dao.observeActivePlaylists(),
         audioSourceDao.observeActiveMappings()
@@ -198,10 +202,12 @@ class BibleRepository @Inject constructor(
                 cache?.put(cacheKey, empty)
                 empty
             } else {
-                files.sortWith(Comparator { a, b -> naturalCompare(a.first, b.first) })
-                val docIds = files.map { it.second }
-                cache?.put(cacheKey, docIds)
-                docIds
+                val sortedDocIds = files
+                    .map { it.second to tokenize(it.first) }
+                    .sortedWith { a, b -> compareTokens(a.second, b.second) }
+                    .map { it.first }
+                cache?.put(cacheKey, sortedDocIds)
+                sortedDocIds
             }
         }
 
@@ -223,8 +229,7 @@ class BibleRepository @Inject constructor(
         endsWith(".ogg",  ignoreCase = true) ||
         endsWith(".flac", ignoreCase = true)
 
-    private fun naturalCompare(a: String, b: String): Int {
-        val aToks = tokenize(a); val bToks = tokenize(b)
+    private fun compareTokens(aToks: List<Pair<Boolean, String>>, bToks: List<Pair<Boolean, String>>): Int {
         for (i in 0 until minOf(aToks.size, bToks.size)) {
             val (aNum, aStr) = aToks[i]; val (bNum, bStr) = bToks[i]
             val cmp = if (aNum && bNum) {
