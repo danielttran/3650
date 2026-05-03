@@ -25,9 +25,8 @@ data class TaskUiModel(
 
 sealed interface DashboardUiState {
     object Loading : DashboardUiState
-    data class Active(
-        val tasks: List<TaskUiModel>
-    ) : DashboardUiState
+    object NoSource : DashboardUiState
+    data class Active(val tasks: List<TaskUiModel>) : DashboardUiState
 }
 
 sealed interface DashboardAction {
@@ -45,18 +44,22 @@ class DashboardViewModel @Inject constructor(
 
     val uiState: StateFlow<DashboardUiState> = combine(
         repository.dailyTasksFlow,
-        audioManager.currentMediaId
-    ) { tasks, playingId ->
+        audioManager.currentMediaId,
+        repository.audioSourceDao.observeActiveMappings()
+    ) { tasks, playingId, activeMappings ->
+        // If there are no mappings at all, no source has been linked yet
+        if (activeMappings.isEmpty()) return@combine DashboardUiState.NoSource
+
         val mappedTasks = tasks.map { task ->
             TaskUiModel(
-                id = task.uniqueId,
-                listId = task.listId,
-                dayOffset = task.dayOffset,
-                title = task.listName,
-                subtitle = "${task.targetBook} ${task.targetChapter}",
-                fileUri = task.fileUri,
+                id          = task.uniqueId,
+                listId      = task.listId,
+                dayOffset   = task.dayOffset,
+                title       = task.listName,
+                subtitle    = "${task.targetBook} ${task.targetChapter}",
+                fileUri     = task.fileUri,
                 isCompleted = task.isCompleted,
-                isPlaying = task.uniqueId == playingId
+                isPlaying   = task.uniqueId == playingId
             )
         }
         DashboardUiState.Active(mappedTasks)
@@ -80,22 +83,15 @@ class DashboardViewModel @Inject constructor(
     val duration: StateFlow<Long> = audioManager.duration
 
     private suspend fun tryRestorePlayback() {
-        val savedId = audioManager.savedMediaId ?: return
+        val savedId  = audioManager.savedMediaId ?: return
         val savedPos = audioManager.savedPosition
-
-        // Wait until the player is connected
-        val player = audioManager.player.first { it != null } ?: return
-
-        // Only restore if the player has no media loaded (fresh start / service was killed)
+        val player   = audioManager.player.first { it != null } ?: return
         if (player.mediaItemCount > 0) return
         if (player.playbackState != Player.STATE_IDLE) return
-
         val tasks = repository.dailyTasksFlow.first()
         val index = tasks.indexOfFirst { it.uniqueId == savedId }
         if (index == -1) return
-
         audioManager.playTasks(tasks, index, savedPos)
-        // Pause immediately after loading so we don't auto-start; user resumes manually
         player.pause()
     }
 
@@ -109,13 +105,11 @@ class DashboardViewModel @Inject constructor(
                 viewModelScope.launch {
                     val tasks = repository.dailyTasksFlow.first()
                     val index = tasks.indexOfFirst { it.uniqueId == action.taskId }
-                    if (index != -1) {
-                        audioManager.playTasks(tasks, index)
-                    }
+                    if (index != -1) audioManager.playTasks(tasks, index)
                 }
             }
             is DashboardAction.PlayPause -> audioManager.togglePlayPause()
-            is DashboardAction.SkipNext -> audioManager.skipToNext()
+            is DashboardAction.SkipNext  -> audioManager.skipToNext()
         }
     }
 }
