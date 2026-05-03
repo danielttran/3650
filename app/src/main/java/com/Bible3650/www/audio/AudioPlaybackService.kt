@@ -13,9 +13,12 @@ import androidx.media3.session.MediaSession
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class AudioPlaybackService : MediaLibraryService() {
+    @Inject lateinit var audioControllerManager: AudioControllerManager
+
     private var mediaLibrarySession: MediaLibrarySession? = null
     private lateinit var player: ExoPlayer
 
@@ -85,6 +88,7 @@ class AudioPlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        audioControllerManager.release()
         mediaLibrarySession?.run {
             player.stop()
             player.release()

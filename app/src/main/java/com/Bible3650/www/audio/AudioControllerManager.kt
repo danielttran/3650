@@ -14,14 +14,15 @@ import com.google.common.util.concurrent.MoreExecutors
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.net.Uri
 import androidx.core.net.toUri
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.firstOrNull
@@ -41,9 +42,6 @@ class AudioControllerManager @Inject constructor(
     private val _player = MutableStateFlow<Player?>(null)
     val player: StateFlow<Player?> = _player
 
-    private val _completedTracks = MutableSharedFlow<Long>(extraBufferCapacity = 10)
-    val completedTracks: SharedFlow<Long> = _completedTracks
-
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying
 
@@ -59,6 +57,8 @@ class AudioControllerManager @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    private var positionUpdateJob: Job? = null
+
     val savedMediaId: String? get() = prefs.getString(KEY_MEDIA_ID, null)
     val savedPosition: Long get() = prefs.getLong(KEY_POSITION, 0L)
 
@@ -67,6 +67,8 @@ class AudioControllerManager @Inject constructor(
     }
 
     private fun savePosition(p: Player) {
+        positionUpdateJob?.cancel()
+        positionUpdateJob = null
         val pos = p.currentPosition
         val id = p.currentMediaItem?.mediaId
         val editor = prefs.edit()
@@ -78,6 +80,18 @@ class AudioControllerManager @Inject constructor(
         _currentPosition.value = pos
     }
 
+    private fun startPositionUpdates(p: Player) {
+        positionUpdateJob?.cancel()
+        positionUpdateJob = scope.launch {
+            while (isActive) {
+                _currentPosition.value = p.currentPosition
+                val dur = p.duration
+                if (dur > 0) _duration.value = dur
+                delay(500)
+            }
+        }
+    }
+
     private fun initializeController() {
         val sessionToken = SessionToken(context, ComponentName(context, AudioPlaybackService::class.java))
         controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
@@ -86,10 +100,12 @@ class AudioControllerManager @Inject constructor(
                 controllerFuture?.get()
             } catch (e: Exception) {
                 android.util.Log.e("AudioController", "MediaController build failed", e)
+                controllerFuture = null
                 null
             }
             if (mediaController == null) {
                 android.util.Log.e("AudioController", "MediaController is null after build")
+                controllerFuture = null
                 return@addListener
             }
             _player.value = mediaController
@@ -97,7 +113,9 @@ class AudioControllerManager @Inject constructor(
             mediaController.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     _isPlaying.value = isPlaying
-                    if (!isPlaying) {
+                    if (isPlaying) {
+                        startPositionUpdates(mediaController)
+                    } else {
                         savePosition(mediaController)
                     }
                 }
@@ -105,7 +123,8 @@ class AudioControllerManager @Inject constructor(
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     val id = mediaItem?.mediaId
                     _currentMediaId.value = id
-                    _duration.value = mediaController.duration.coerceAtLeast(0L)
+                    val dur = mediaController.duration
+                    if (dur > 0) _duration.value = dur
                     if (id != null) {
                         prefs.edit().putString(KEY_MEDIA_ID, id).putLong(KEY_POSITION, 0L).apply()
                     }
@@ -119,7 +138,14 @@ class AudioControllerManager @Inject constructor(
                 ) {
                     if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
                         oldPosition.mediaItem?.mediaId?.substringBefore("_")?.toLongOrNull()?.let { listId ->
-                            _completedTracks.tryEmit(listId)
+                            // Run in manager's own scope so this survives ViewModel destruction
+                            scope.launch {
+                                try {
+                                    repository.advanceListDay(listId)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("AudioController", "Error advancing list day", e)
+                                }
+                            }
                         }
                     }
                 }
@@ -127,7 +153,13 @@ class AudioControllerManager @Inject constructor(
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_ENDED) {
                         mediaController.currentMediaItem?.mediaId?.substringBefore("_")?.toLongOrNull()?.let { listId ->
-                            _completedTracks.tryEmit(listId)
+                            scope.launch {
+                                try {
+                                    repository.advanceListDay(listId)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("AudioController", "Error advancing list day", e)
+                                }
+                            }
                         }
                         prefs.edit().remove(KEY_MEDIA_ID).remove(KEY_POSITION).apply()
                     }
@@ -145,7 +177,9 @@ class AudioControllerManager @Inject constructor(
     fun playTasks(tasks: List<DailyTask>, startIndex: Int = 0, startPositionMs: Long = androidx.media3.common.C.TIME_UNSET) {
         android.util.Log.d("AudioController", "playTasks: tasks=${tasks.size}, startIndex=$startIndex")
         val player = _player.value ?: run {
-            android.util.Log.w("AudioController", "playTasks failed: Player is null")
+            // Attempt to reconnect if a previous release cleared the controller
+            if (controllerFuture == null) initializeController()
+            android.util.Log.w("AudioController", "playTasks failed: Player is null, initiating reconnect")
             return
         }
 
@@ -170,7 +204,7 @@ class AudioControllerManager @Inject constructor(
 
                 withContext(Dispatchers.Main) {
                     if (requestId != currentPlaylistRequestId) return@withContext
-                    
+
                     val firstItem = MediaItem.Builder()
                         .setMediaId(firstTask.uniqueId)
                         .setUri(firstUri)
@@ -202,14 +236,18 @@ class AudioControllerManager @Inject constructor(
 
                 withContext(Dispatchers.Main) {
                     if (requestId != currentPlaylistRequestId) return@withContext
-                    
+
                     val before = allMediaItems.take(startIndex)
                     val after = allMediaItems.drop(startIndex + 1)
-                    
+
                     // Append items after current
                     if (after.isNotEmpty()) player.addMediaItems(after)
-                    // Prepend items before current
-                    if (before.isNotEmpty()) player.addMediaItems(0, before)
+                    // Prepend items before current; seek to maintain correct window index
+                    if (before.isNotEmpty()) {
+                        val currentPos = player.currentPosition
+                        player.addMediaItems(0, before)
+                        player.seekTo(before.size, currentPos)
+                    }
                 }
             } catch (e: Exception) {
                 android.util.Log.e("AudioController", "Failed to play tasks", e)
@@ -231,9 +269,14 @@ class AudioControllerManager @Inject constructor(
     }
 
     fun release() {
-        scope.cancel()
+        positionUpdateJob?.cancel()
+        positionUpdateJob = null
+        _isPlaying.value = false
         _player.value?.release()
         _player.value = null
         controllerFuture?.let { MediaController.releaseFuture(it) }
+        controllerFuture = null
+        // Reinitialize so the controller is ready when the service next starts
+        initializeController()
     }
 }
