@@ -28,7 +28,8 @@ class ProfileViewModel @Inject constructor(
     private val repository: BibleRepository
 ) : ViewModel() {
 
-    val uiState: StateFlow<ProfileUiState> = repository.dao.observeActivePlaylists()
+    // #15: Use repository.listsWithBooksFlow instead of repository.dao directly.
+    val uiState: StateFlow<ProfileUiState> = repository.listsWithBooksFlow
         .map { lists ->
             try {
                 var totalChapters = 0
@@ -53,7 +54,12 @@ class ProfileViewModel @Inject constructor(
                         var chaptersPassed = 0
                         for (book in books) {
                             val bookChapterCount = BibleRegistry.getChapterCount(book.bookName)
-                            val readThisLoop = if (remainingChapters >= chaptersPassed + bookChapterCount) 1 else 0
+
+                            // #8: Mark a book as read in the current partial loop when the
+                            // chapter cursor has moved past the start of this book.
+                            // Old condition (>= chaptersPassed + bookChapterCount) required the
+                            // entire book to be covered — it should just require passing chapter 1.
+                            val readThisLoop = if (remainingChapters > chaptersPassed) 1 else 0
 
                             val currentCount = bookCounts.getOrDefault(book.bookName, 0)
                             bookCounts[book.bookName] = currentCount + fullLoops + readThisLoop
@@ -79,9 +85,10 @@ class ProfileViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ProfileUiState())
 
+    // #15: Use repository.resetStats() wrapper instead of repository.dao directly.
     fun resetStats() {
         viewModelScope.launch {
-            repository.dao.resetAllStats()
+            repository.resetStats()
         }
     }
 

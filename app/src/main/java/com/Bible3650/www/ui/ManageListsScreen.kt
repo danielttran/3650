@@ -69,9 +69,15 @@ fun ManageListsScreen(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         if (uri != null) {
-            context.contentResolver.takePersistableUriPermission(
-                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
+            // 3A: Some providers (cloud storage, third-party file managers) don't support
+            // persistable URI permissions and throw SecurityException. Catch it gracefully.
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: SecurityException) {
+                android.util.Log.e("ManageLists", "Provider does not support persistable URIs", e)
+            }
             val suggested = uri.lastPathSegment
                 ?.substringAfterLast('/')
                 ?.substringAfterLast(':')
@@ -118,7 +124,9 @@ fun ManageListsScreen(
                 Icon(Icons.Default.Add, contentDescription = "Add Reading List")
             }
         }
-    ) { _ ->
+    ) { paddingValues ->
+        // #9: Apply paddingValues so LazyColumn content is not hidden behind the FAB
+        // or the system navigation bar at the bottom of the screen.
         // ── Step 1: Preset picker ──────────────────────────────────────────────
         if (showResetPickerDialog) {
             AlertDialog(
@@ -200,7 +208,9 @@ fun ManageListsScreen(
         }
 
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -295,9 +305,11 @@ fun ManageListsScreen(
                 item(key = "validation_banner") {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
+                        // #11: Use Material3 theme tokens instead of hard-coded colors so the
+                        // banner renders correctly in both light/dark and dynamic-color modes.
                         colors = CardDefaults.cardColors(
-                            containerColor = Color(0xFFFFF9C4),
-                            contentColor = Color(0xFF5D4037)
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer
                         )
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {

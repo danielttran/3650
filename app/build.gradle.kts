@@ -16,7 +16,7 @@ android {
     defaultConfig {
         applicationId = "com.Bible3650.www"
         minSdk = 26
-        targetSdk = 31
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
@@ -25,7 +25,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // #17: Enable R8 minification in release so debug Log.d/Log.v calls are
+            // stripped via the rule in proguard-rules.pro. This also shrinks the APK.
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -60,6 +62,18 @@ android {
             useLegacyPackaging = true
         }
     }
+
+    // #19: Tell Room's KSP processor where to write the exported schema JSON files.
+    // Commit the schemas/ directory to version control as a migration history record.
+    sourceSets {
+        getByName("main") {
+            assets.srcDirs("schemas")
+        }
+    }
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {

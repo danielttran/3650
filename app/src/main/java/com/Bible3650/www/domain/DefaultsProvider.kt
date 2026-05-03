@@ -28,27 +28,27 @@ fun PresetPlan.toKey(): String = when (this) {
 object DefaultsProvider {
     /** Original Grant Horner 10-list system */
     val grantHornerLists = listOf(
-        "List 1: "  to listOf("Matthew", "Mark", "Luke", "John"),
-        "List 2: "  to listOf("Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy"),
-        "List 3: "  to listOf("Romans", "1 Corinthians", "2 Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians", "Hebrews"),
-        "List 4: "  to listOf("1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation"),
-        "List 5: "  to listOf("Job", "Ecclesiastes", "Song of Songs"),
-        "List 6: "  to listOf("Psalm"),
-        "List 7: "  to listOf("Proverbs"),
-        "List 8: "  to listOf("Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther"),
-        "List 9: "  to listOf("Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi"),
-        "List 10: " to listOf("Acts")
+        "List 1:"   to listOf("Matthew", "Mark", "Luke", "John"),
+        "List 2:"   to listOf("Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy"),
+        "List 3:"   to listOf("Romans", "1 Corinthians", "2 Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians", "Hebrews"),
+        "List 4:"   to listOf("1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation"),
+        "List 5:"   to listOf("Job", "Ecclesiastes", "Song of Songs"),
+        "List 6:"   to listOf("Psalm"),
+        "List 7:"   to listOf("Proverbs"),
+        "List 8:"   to listOf("Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther"),
+        "List 9:"   to listOf("Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi"),
+        "List 10:"  to listOf("Acts")
     )
 
     /** Daniel 7-list system */
     val daniel7Lists = listOf(
-        "List 1: "  to listOf("Matthew", "Mark", "Luke", "John", "Galatians", "Romans"),
-        "List 2: "  to listOf("Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings"),
-        "List 3: "  to listOf("Psalm"),
-        "List 4: "  to listOf("1 Thessalonians", "2 Thessalonians", "1 Corinthians", "2 Corinthians", "Colossians", "Ephesians", "Philemon", "Philippians", "1 Timothy", "2 Timothy", "Titus", "Hebrews", "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation"),
-        "List 5: "  to listOf("Lamentations", "Song of Songs", "Job", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther", "Daniel"),
-        "List 6: "  to listOf("Proverbs", "Ecclesiastes", "Acts"),
-        "List 7: "  to listOf("Jonah", "Amos", "Hosea", "Micah", "Isaiah", "Zephaniah", "Nahum", "Habakkuk", "Jeremiah", "Obadiah", "Ezekiel", "Haggai", "Zechariah", "Joel", "Malachi")
+        "List 1:"   to listOf("Matthew", "Mark", "Luke", "John", "Galatians", "Romans"),
+        "List 2:"   to listOf("Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings"),
+        "List 3:"   to listOf("Psalm"),
+        "List 4:"   to listOf("1 Thessalonians", "2 Thessalonians", "1 Corinthians", "2 Corinthians", "Colossians", "Ephesians", "Philemon", "Philippians", "1 Timothy", "2 Timothy", "Titus", "Hebrews", "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation"),
+        "List 5:"   to listOf("Lamentations", "Song of Songs", "Job", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther", "Daniel"),
+        "List 6:"   to listOf("Proverbs", "Ecclesiastes", "Acts"),
+        "List 7:"   to listOf("Jonah", "Amos", "Hosea", "Micah", "Isaiah", "Zephaniah", "Nahum", "Habakkuk", "Jeremiah", "Obadiah", "Ezekiel", "Haggai", "Zechariah", "Joel", "Malachi")
     )
 
     fun listsFor(plan: PresetPlan) = when (plan) {

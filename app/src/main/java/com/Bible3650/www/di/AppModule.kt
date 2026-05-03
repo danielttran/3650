@@ -8,6 +8,7 @@ import com.Bible3650.www.audio.FileSystemProvider
 import com.Bible3650.www.data.local.AppDatabase
 import com.Bible3650.www.data.local.AudioSourceDao
 import com.Bible3650.www.data.local.BibleDao
+import com.Bible3650.www.data.local.MIGRATION_1_2
 import com.Bible3650.www.data.local.MIGRATION_2_3
 import com.Bible3650.www.data.local.MIGRATION_3_4
 import com.Bible3650.www.data.local.MIGRATION_4_5
@@ -35,7 +36,8 @@ abstract class AppModule {
         @Singleton
         fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "bible_database")
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                // #16: MIGRATION_1_2 added so pre-release v1 users upgrade cleanly
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 .fallbackToDestructiveMigration()
                 .build()
 

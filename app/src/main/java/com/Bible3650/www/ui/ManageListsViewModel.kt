@@ -1,6 +1,5 @@
 package com.Bible3650.www.ui
 
-import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.Bible3650.www.data.BibleRepository
@@ -24,7 +23,8 @@ class ManageListsViewModel @Inject constructor(
     private val repository: BibleRepository
 ) : ViewModel() {
 
-    val listsFlow: StateFlow<List<ListWithBooks>> = repository.dao.observeActivePlaylists()
+    // #15: Use repository.listsWithBooksFlow instead of accessing repository.dao directly.
+    val listsFlow: StateFlow<List<ListWithBooks>> = repository.listsWithBooksFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val validationResults: StateFlow<ValidationResult> = listsFlow.map {
@@ -53,7 +53,7 @@ class ManageListsViewModel @Inject constructor(
     fun deleteList(list: ReadingListEntity) {
         viewModelScope.launch {
             try {
-                repository.dao.deleteList(list)
+                repository.deleteList(list)
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error deleting list", e)
                 _uiEvents.emit("Failed to delete list.")
@@ -64,11 +64,7 @@ class ManageListsViewModel @Inject constructor(
     fun createList(name: String, books: List<String>, colorArgb: Int) {
         viewModelScope.launch {
             try {
-                val maxOrder = repository.dao.getMaxListOrder() ?: -1
-                repository.dao.createCustomList(
-                    ReadingListEntity(listName = name, listColor = colorArgb, listOrder = maxOrder + 1),
-                    books
-                )
+                repository.createList(name, books, colorArgb)
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error creating list", e)
                 _uiEvents.emit("Failed to create list.")
@@ -79,7 +75,7 @@ class ManageListsViewModel @Inject constructor(
     fun updateList(list: ReadingListEntity, newBooks: List<String>) {
         viewModelScope.launch {
             try {
-                repository.dao.updateCustomList(list, newBooks)
+                repository.updateList(list, newBooks)
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error updating list", e)
                 _uiEvents.emit("Failed to update list.")
@@ -90,7 +86,7 @@ class ManageListsViewModel @Inject constructor(
     fun reorderLists(reorderedLists: List<ReadingListEntity>) {
         viewModelScope.launch {
             try {
-                repository.dao.reorderLists(reorderedLists.map { it.listId })
+                repository.reorderLists(reorderedLists.map { it.listId })
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error reordering lists", e)
                 _uiEvents.emit("Failed to reorder lists.")

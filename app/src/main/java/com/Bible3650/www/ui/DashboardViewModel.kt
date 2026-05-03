@@ -99,7 +99,17 @@ class DashboardViewModel @Inject constructor(
                 android.util.Log.e("DashboardVM", "Initialization failed", e)
             }
         }
-        // Track completion is now handled inside AudioControllerManager's own scope,
+        // #13: Forward audio playback errors (e.g. unresolvable URI) as snackbar events.
+        viewModelScope.launch {
+            audioManager.playerError.collect { errorMsg ->
+                _uiEvents.emit(DashboardUiEvent.ShowSnackbar(
+                    message = errorMsg,
+                    actionLabel = "",
+                    listId = -1L
+                ))
+            }
+        }
+        // Track completion is handled inside AudioControllerManager's own scope,
         // ensuring advanceListDay runs even when the UI is in the background.
     }
 
@@ -108,21 +118,24 @@ class DashboardViewModel @Inject constructor(
     val duration: StateFlow<Long> = audioManager.duration
 
     private suspend fun syncPlayerIfPlaying(listId: Long) {
-        // taskId for day 0 is always "listId_0"
-        val currentId = currentMediaId.value
-        if (currentId == "${listId}_0") {
-            // Guard against an indefinitely-suspended coroutine when the audio source
-            // folder is missing or unlinked (fileUri would never become non-empty).
-            val updatedTasks = withTimeoutOrNull(5_000) {
-                repository.dailyTasksFlow
-                    .filter { tasks -> tasks.any { it.listId == listId && it.fileUri.isNotEmpty() } }
-                    .first()
-            } ?: return  // Audio source unavailable; skip resync
+        val currentId = currentMediaId.value ?: return
+        // 1C: uniqueId format is now "listId_dayOffset_book_chapter".
+        // Parse the listId from the first segment instead of string-comparing the full ID,
+        // which would fail now that book+chapter are appended.
+        val playingListId = currentId.substringBefore("_").toLongOrNull() ?: return
+        if (playingListId != listId) return
 
-            val startIndex = updatedTasks.indexOfFirst { it.uniqueId == currentId }
-            if (startIndex != -1) {
-                audioManager.playTasks(updatedTasks, startIndex)
-            }
+        // Guard against an indefinitely-suspended coroutine when the audio source
+        // folder is missing or unlinked (fileUri would never become non-empty).
+        val updatedTasks = withTimeoutOrNull(5_000) {
+            repository.dailyTasksFlow
+                .filter { tasks -> tasks.any { it.listId == listId && it.fileUri.isNotEmpty() } }
+                .first()
+        } ?: return  // Audio source unavailable; skip resync
+
+        val startIndex = updatedTasks.indexOfFirst { it.uniqueId == currentId }
+        if (startIndex != -1) {
+            audioManager.playTasks(updatedTasks, startIndex)
         }
     }
 

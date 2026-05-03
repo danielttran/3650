@@ -156,10 +156,16 @@ fun ReviewMappingsScreen(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         if ((uri != null) && (pendingBook != null)) {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
+            // 3A: Some cloud/third-party providers don't support persistable permissions
+            // and throw SecurityException. Catch it to prevent a hard crash.
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: SecurityException) {
+                android.util.Log.e("ReviewMappings", "Provider does not support persistable URIs", e)
+            }
             val book = pendingBook!!
             isCountingFilesFor = book
             coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -247,13 +253,15 @@ fun ReviewMappingsScreen(
 
 @Composable
 private fun MappingRow(row: MappingRowUi, isCounting: Boolean, onPickFolder: () -> Unit) {
+    // 3B: Use Material3 theme tokens instead of hardcoded amber/yellow so the
+    // warning row renders correctly in dark mode and with dynamic color.
     val (iconTint, containerColor) = when {
-        !row.isMapped       -> MaterialTheme.colorScheme.error to
-                               MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
-        !row.isHighConfidence -> Color(0xFFF59E0B) to           // amber warning
-                               Color(0xFFFEF3C7).copy(alpha = 0.4f)
-        else                -> MaterialTheme.colorScheme.primary to
-                               MaterialTheme.colorScheme.surfaceVariant
+        !row.isMapped         -> MaterialTheme.colorScheme.error to
+                                 MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+        !row.isHighConfidence -> MaterialTheme.colorScheme.tertiary to
+                                 MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f)
+        else                  -> MaterialTheme.colorScheme.primary to
+                                 MaterialTheme.colorScheme.surfaceVariant
     }
 
     Surface(

@@ -13,11 +13,24 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BookMappingEntity::class
     ],
     version = 8,
-    exportSchema = false
+    // #19: Schema export enabled — Room will write JSON schema files to the directory
+    // configured via room.schemaLocation in build.gradle.kts. This acts as a free
+    // migration safety net and documents the schema history in version control.
+    exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun bibleDao(): BibleDao
     abstract fun audioSourceDao(): AudioSourceDao
+}
+
+// #16: Handles upgrades from the very first schema (v1) which lacked list_order.
+// Without this, any user who installed the earliest pre-release build would crash
+// with "A migration from 1 to 2 was required but not found".
+val MIGRATION_1_2 = object : Migration(1, 2) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // v1 → v2: add list_order column (was missing in the initial schema)
+        db.execSQL("ALTER TABLE reading_lists ADD COLUMN list_order INTEGER NOT NULL DEFAULT 0")
+    }
 }
 
 val MIGRATION_7_8 = object : Migration(7, 8) {

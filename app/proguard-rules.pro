@@ -1,21 +1,29 @@
 # Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# ---------------------------------------------------------------------------
+# Crash reporting: keep source file names and line numbers in stack traces
+# ---------------------------------------------------------------------------
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# ---------------------------------------------------------------------------
+# #17: Strip verbose/debug log calls in release builds.
+# R8 treats these methods as having no side effects and removes all call sites.
+# Log.e / Log.w are retained so production errors are still visible in logcat.
+# ---------------------------------------------------------------------------
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+}
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# ---------------------------------------------------------------------------
+# Gson: keep data classes used for backup serialization so field names are not
+# renamed by R8 and JSON import/export continues to work after minification.
+# ---------------------------------------------------------------------------
+-keep class com.Bible3650.www.data.ProgressBackup { *; }
+-keep class com.Bible3650.www.data.ReadingListBackup { *; }
+-keep class com.Bible3650.www.data.AudioSourceBackup { *; }
+-keep class com.Bible3650.www.data.local.ReadingListEntity { *; }
+-keep class com.Bible3650.www.data.local.ListBookEntity { *; }
+-keep class com.Bible3650.www.data.local.AudioSourceEntity { *; }
+-keep class com.Bible3650.www.data.local.BookMappingEntity { *; }

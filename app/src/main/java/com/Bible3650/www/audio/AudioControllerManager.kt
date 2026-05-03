@@ -15,16 +15,18 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.net.Uri
 import androidx.core.net.toUri
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.firstOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
@@ -34,6 +36,9 @@ import com.Bible3650.www.di.IoDispatcher
 private const val PREFS_NAME = "audio_playback_state"
 private const val KEY_MEDIA_ID = "last_media_id"
 private const val KEY_POSITION = "last_position_ms"
+
+// Suffix used to construct/parse task uniqueIds ("listId_dayOffset")
+private const val TASK_ID_SEPARATOR = "_"
 
 @Singleton
 class AudioControllerManager @Inject constructor(
@@ -58,6 +63,12 @@ class AudioControllerManager @Inject constructor(
     private val _duration = MutableStateFlow(0L)
     val duration: StateFlow<Long> = _duration
 
+    // #13: Expose playback errors (e.g. unresolvable audio URI) so the UI can show a snackbar.
+    private val _playerError = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val playerError: SharedFlow<String> = _playerError.asSharedFlow()
+
+    // #10: Singleton scope — never cancelled. release() only tears down the MediaController,
+    // not the scope itself, so coroutines launched after reconnect work correctly.
     private val scope = CoroutineScope(SupervisorJob() + mainDispatcher)
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -134,6 +145,9 @@ class AudioControllerManager @Inject constructor(
                     }
                 }
 
+                // AUTO_TRANSITION fires for items 0..N-1 when they finish and the player
+                // moves to the next item. STATE_ENDED (below) fires for the last item only.
+                // The two handlers are mutually exclusive, so there is no double-fire risk.
                 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
                 override fun onPositionDiscontinuity(
                     oldPosition: Player.PositionInfo,
@@ -141,36 +155,46 @@ class AudioControllerManager @Inject constructor(
                     reason: Int
                 ) {
                     if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
-                        oldPosition.mediaItem?.mediaId?.substringBefore("_")?.toLongOrNull()?.let { listId ->
-                            // Run in manager's own scope so this survives ViewModel destruction
-                            scope.launch {
-                                try {
-                                    repository.advanceListDay(listId)
-                                } catch (e: Exception) {
-                                    android.util.Log.e("AudioController", "Error advancing list day", e)
+                        oldPosition.mediaItem?.mediaId
+                            ?.substringBefore(TASK_ID_SEPARATOR)
+                            ?.toLongOrNull()
+                            ?.let { listId ->
+                                // Run in manager's own scope so this survives ViewModel destruction
+                                scope.launch {
+                                    try {
+                                        repository.advanceListDay(listId)
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("AudioController", "Error advancing list day", e)
+                                    }
                                 }
                             }
-                        }
                     }
                 }
 
+                // Handles the last item in the playlist — AUTO_TRANSITION does NOT fire here
+                // because there is no next media item, so this is the only place the last
+                // list day gets advanced. Also clears saved position so the mini-player resets.
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_ENDED) {
-                        mediaController.currentMediaItem?.mediaId?.substringBefore("_")?.toLongOrNull()?.let { listId ->
-                            scope.launch {
-                                try {
-                                    repository.advanceListDay(listId)
-                                } catch (e: Exception) {
-                                    android.util.Log.e("AudioController", "Error advancing list day", e)
+                        mediaController.currentMediaItem?.mediaId
+                            ?.substringBefore(TASK_ID_SEPARATOR)
+                            ?.toLongOrNull()
+                            ?.let { listId ->
+                                scope.launch {
+                                    try {
+                                        repository.advanceListDay(listId)
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("AudioController", "Error advancing list day on STATE_ENDED", e)
+                                    }
                                 }
                             }
-                        }
                         prefs.edit().remove(KEY_MEDIA_ID).remove(KEY_POSITION).apply()
                     }
                 }
 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                     android.util.Log.e("AudioBible", "ExoPlayer Error: ${error.message}", error)
+                    _playerError.tryEmit("Playback error: ${error.message ?: "unknown"}")
                 }
             })
         }, MoreExecutors.directExecutor())
@@ -178,6 +202,8 @@ class AudioControllerManager @Inject constructor(
 
     private var currentPlaylistRequestId: Long = 0
 
+    // #5: Resolve ALL URIs before touching the player so there is no seek race from
+    // the old two-phase build. Latency is acceptable for ≤10 items.
     fun playTasks(
         tasks: List<DailyTask>,
         startIndex: Int = 0,
@@ -202,7 +228,7 @@ class AudioControllerManager @Inject constructor(
                 }
             }
             if (isMatch) {
-                // Playlist matches! Just seek to the required index
+                // Playlist matches — just seek to the required index and play/pause
                 val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs else 0L
                 player.seekTo(startIndex, startPos)
                 if (playWhenReady) player.play() else player.pause()
@@ -214,8 +240,6 @@ class AudioControllerManager @Inject constructor(
 
         scope.launch(ioDispatcher) {
             try {
-                // 1. Resolve ONLY the first item to start playing immediately
-                val firstTask = tasks.getOrNull(startIndex) ?: return@launch
                 val activeMappings = repository.audioSourceDao.observeActiveMappings().firstOrNull() ?: emptyList()
                 val mappingsByBook = activeMappings.associateBy { it.bookName }
                 val activeSource   = repository.audioSourceDao.getActiveSource()
@@ -227,57 +251,35 @@ class AudioControllerManager @Inject constructor(
                     return repository.resolveChapterFile(treeUri, mapping.folderDocId, task.targetChapter, repository.folderCache)
                 }
 
-                val firstUri = resolveUri(firstTask)
-
-                withContext(mainDispatcher) {
-                    if (requestId != currentPlaylistRequestId) return@withContext
-
-                    val firstItem = MediaItem.Builder()
-                        .setMediaId(firstTask.uniqueId)
-                        .setUri(firstUri)
+                // Resolve all URIs up front (single atomic playlist set, no seek race)
+                val allMediaItems = tasks.map { task ->
+                    val uri = resolveUri(task)
+                    MediaItem.Builder()
+                        .setMediaId(task.uniqueId)
+                        .setUri(uri)
                         .setRequestMetadata(
                             MediaItem.RequestMetadata.Builder()
-                                .setMediaUri(firstUri)
+                                .setMediaUri(uri)
                                 .build()
                         )
                         .build()
-                    player.setMediaItem(firstItem)
-                    if (startPositionMs != androidx.media3.common.C.TIME_UNSET) player.seekTo(startPositionMs)
-                    player.prepare()
-                    if (playWhenReady) player.play() else player.pause()
                 }
 
-                // 2. Resolve the rest in background
-                val allMediaItems = mutableListOf<MediaItem>()
-                for (task in tasks) {
-                    val uri = if (task.uniqueId == firstTask.uniqueId) firstUri else resolveUri(task)
-                    allMediaItems.add(
-                        MediaItem.Builder()
-                            .setMediaId(task.uniqueId)
-                            .setUri(uri)
-                            .setRequestMetadata(
-                                MediaItem.RequestMetadata.Builder()
-                                    .setMediaUri(uri)
-                                    .build()
-                            )
-                            .build()
-                    )
+                // #13: Warn if the start item has no resolvable URI
+                val startUri = allMediaItems.getOrNull(startIndex)?.localConfiguration?.uri
+                if (startUri == null) {
+                    android.util.Log.w("AudioController", "No audio URI for task at index $startIndex")
+                    _playerError.tryEmit("Audio file not found. Check your audio source mapping.")
                 }
 
                 withContext(mainDispatcher) {
                     if (requestId != currentPlaylistRequestId) return@withContext
 
-                    val before = allMediaItems.take(startIndex)
-                    val after = allMediaItems.drop(startIndex + 1)
-
-                    // Append items after current
-                    if (after.isNotEmpty()) player.addMediaItems(after)
-                    // Prepend items before current; seek to maintain correct window index
-                    if (before.isNotEmpty()) {
-                        val currentPos = player.currentPosition
-                        player.addMediaItems(0, before)
-                        player.seekTo(before.size, currentPos)
-                    }
+                    val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs
+                                   else androidx.media3.common.C.TIME_UNSET
+                    player.setMediaItems(allMediaItems, startIndex, startPos)
+                    player.prepare()
+                    if (playWhenReady) player.play() else player.pause()
                 }
             } catch (e: Exception) {
                 android.util.Log.e("AudioController", "Failed to play tasks", e)
@@ -301,6 +303,8 @@ class AudioControllerManager @Inject constructor(
         _player.value?.seekToNext()
     }
 
+    // #10: Do NOT cancel the singleton scope here. The scope must survive across
+    // release/reconnect cycles. Only tear down the controller and position job.
     fun release() {
         positionUpdateJob?.cancel()
         positionUpdateJob = null
@@ -309,6 +313,6 @@ class AudioControllerManager @Inject constructor(
         _player.value = null
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null
-        scope.cancel()
+        // scope.cancel() intentionally removed — @Singleton scope lives forever
     }
 }

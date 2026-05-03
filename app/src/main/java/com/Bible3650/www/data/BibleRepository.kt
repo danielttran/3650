@@ -31,28 +31,46 @@ import com.Bible3650.www.data.local.AppDatabase
 
 private const val MAX_FOLDER_CACHE_ENTRIES = 100
 
+// Current backup schema version. Checked on import to guard against stale backups.
+private const val BACKUP_VERSION_CURRENT = 1
+
 @Singleton
 class BibleRepository @Inject constructor(
     private val database: AppDatabase,
-    val dao: BibleDao,
-    val audioSourceDao: AudioSourceDao,
+    // #15: Both DAOs are internal so AudioControllerManager (same module) can access
+    // audioSourceDao directly for hot-path URI resolution, but external callers must
+    // go through repository methods which also handle cache invalidation.
+    internal val dao: BibleDao,
+    internal val audioSourceDao: AudioSourceDao,
     private val contentResolver: ContentResolver
 ) {
     // Shared cache of folder→sorted-docIds so both dailyTasksFlow and
     // playTasks benefit from the same one-time directory scan.
     internal val folderCache = android.util.LruCache<String, List<String>>(MAX_FOLDER_CACHE_ENTRIES)
     private val cacheMutexes = ConcurrentHashMap<String, Mutex>()
-    
+
     private val resolvedUris = MutableStateFlow<Map<String, String>>(emptyMap())
     private val resolvingTasks = ConcurrentHashMap.newKeySet<String>()
     // Lifecycle-bound scope for background URI resolution — never leaks like ad-hoc scopes
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    // #7: Guard so freezeActiveTasks() only runs once per process lifetime.
+    @Volatile private var frozenOnce = false
+
     /** Emits true when at least one audio source mapping is active. */
     val hasActiveSourceFlow: Flow<Boolean> =
         audioSourceDao.observeActiveMappings().map { it.isNotEmpty() }
 
+    // #15: Expose raw list-with-books data for screens that need full entity access
+    // (ManageListsScreen, ProfileScreen) without leaking the DAO itself.
+    val listsWithBooksFlow: Flow<List<ListWithBooks>> = dao.observeActivePlaylists()
+
+    // #7: idempotency guard — freezeActiveTasks is called on every cold start and must
+    // not issue N database writes if the user re-opens the app rapidly.
     suspend fun freezeActiveTasks() {
+        if (frozenOnce) return
+        frozenOnce = true
+
         val lists = dao.getAllLists()
         val updates = mutableListOf<suspend () -> Unit>()
         lists.forEach { listData ->
@@ -87,8 +105,11 @@ class BibleRepository @Inject constructor(
         val tasks = lists.map { listData ->
             resolveDailyTask(listData, 0)
         }
-        
-        val missing = tasks.filter { it.fileUri.isEmpty() && resolvingTasks.add(it.uniqueId) }
+
+        // 1A: Guard by key presence, NOT by empty string. getTaskFileUri returns "" when a
+        // file can't be found, and the old isEmpty() check would re-queue that task on every
+        // emission, creating an infinite background-fetch loop that drains the battery.
+        val missing = tasks.filter { !uris.containsKey(it.uniqueId) && resolvingTasks.add(it.uniqueId) }
         if (missing.isNotEmpty()) {
             repositoryScope.launch {
                 val newUris = missing.associate { task ->
@@ -98,11 +119,12 @@ class BibleRepository @Inject constructor(
                 missing.forEach { resolvingTasks.remove(it.uniqueId) }
             }
         }
-        
+
         tasks.map { task ->
-            if (task.fileUri.isEmpty()) {
-                task.copy(fileUri = uris[task.uniqueId] ?: "")
-            } else task
+            // Use the cached value if the key exists (even if the value is empty —
+            // that means we already tried and the file wasn't found, so don't retry).
+            val cachedUri = uris[task.uniqueId]
+            if (cachedUri != null) task.copy(fileUri = cachedUri) else task
         }
     }
         .distinctUntilChanged()
@@ -124,6 +146,28 @@ class BibleRepository @Inject constructor(
             dao.createCustomList(ReadingListEntity(listName = name, listOrder = index, listColor = 0), books)
         }
     }
+
+    // ---------------------------------------------------------------------------
+    // #15: Repository-level wrappers for list mutations (ManageListsViewModel,
+    // ProfileViewModel, etc. should call these instead of accessing dao directly)
+    // ---------------------------------------------------------------------------
+
+    suspend fun deleteList(list: ReadingListEntity) = dao.deleteList(list)
+
+    suspend fun createList(name: String, books: List<String>, colorArgb: Int) {
+        val maxOrder = dao.getMaxListOrder() ?: -1
+        dao.createCustomList(
+            ReadingListEntity(listName = name, listColor = colorArgb, listOrder = maxOrder + 1),
+            books
+        )
+    }
+
+    suspend fun updateList(list: ReadingListEntity, newBooks: List<String>) =
+        dao.updateCustomList(list, newBooks)
+
+    suspend fun reorderLists(listIds: List<Long>) = dao.reorderLists(listIds)
+
+    suspend fun resetStats() = dao.resetAllStats()
 
     // ---------------------------------------------------------------------------
     // Chapter resolution
@@ -160,7 +204,11 @@ class BibleRepository @Inject constructor(
         return DailyTask(
             listId        = list.listId,
             dayOffset     = dayOffset,
-            uniqueId      = "${list.listId}_$dayOffset",
+            // 1C: Include book+chapter so ExoPlayer's playlist match check correctly
+            // detects when the user edits a list (e.g., swaps Genesis for Exodus).
+            // Old format "listId_dayOffset" was stable across edits — ExoPlayer would
+            // assume the playlist hadn't changed and replay the old audio file.
+            uniqueId      = "${list.listId}_${dayOffset}_${targetBook}_${targetChapter}",
             listName      = list.listName,
             targetBook    = targetBook,
             targetChapter = targetChapter,
@@ -173,7 +221,7 @@ class BibleRepository @Inject constructor(
     suspend fun getTaskFileUri(targetBook: String, targetChapter: Int): String {
         val activeSource = audioSourceDao.getActiveSource() ?: return ""
         val mapping = audioSourceDao.getMappingForBook(activeSource.sourceId, targetBook) ?: return ""
-        
+
         return try {
             val treeUri = (mapping.overrideTreeUri ?: activeSource.rootTreeUri).toUri()
             resolveChapterFile(treeUri, mapping.folderDocId, targetChapter, folderCache)?.toString() ?: ""
@@ -213,20 +261,26 @@ class BibleRepository @Inject constructor(
         Gson().toJson(backup)
     }
 
+    // #3: Guard prevents wiping audio sources when the backup contains none.
+    // #14: Reject backups with an unsupported schema version to avoid silent corruption.
     suspend fun importProgress(json: String): Boolean = withContext(Dispatchers.IO) {
         val backup = try {
             Gson().fromJson(json, ProgressBackup::class.java)
         } catch (e: Exception) {
-            android.util.Log.e("BibleRepo", "Import failed", e)
+            android.util.Log.e("BibleRepo", "Import JSON parse failed", e)
             null
         } ?: return@withContext false
+
+        // #14: Version guard — reject unknown future schemas
+        if (backup.version > BACKUP_VERSION_CURRENT) {
+            android.util.Log.e("BibleRepo", "Unsupported backup version ${backup.version} (current: $BACKUP_VERSION_CURRENT)")
+            return@withContext false
+        }
 
         try {
             database.withTransaction {
                 dao.clearAllBooks()
                 dao.clearAllLists()
-                audioSourceDao.clearAllMappings()
-                audioSourceDao.clearAllSources()
 
                 backup.readingLists.forEach { rb ->
                     val list = rb.entity.copy(listId = 0)
@@ -234,10 +288,16 @@ class BibleRepository @Inject constructor(
                     dao.insertBooks(rb.books.map { it.copy(id = 0, listId = newId) })
                 }
 
-                backup.audioSources.forEach { sb ->
-                    val source = sb.entity.copy(sourceId = 0)
-                    val newId = audioSourceDao.insertSource(source)
-                    audioSourceDao.upsertMappings(sb.mappings.map { it.copy(sourceId = newId) })
+                // #3: Only replace audio sources if the backup actually includes them.
+                // An old/stripped backup with no sources must NOT wipe existing mappings.
+                if (backup.audioSources.isNotEmpty()) {
+                    audioSourceDao.clearAllMappings()
+                    audioSourceDao.clearAllSources()
+                    backup.audioSources.forEach { sb ->
+                        val source = sb.entity.copy(sourceId = 0)
+                        val newId = audioSourceDao.insertSource(source)
+                        audioSourceDao.upsertMappings(sb.mappings.map { it.copy(sourceId = newId) })
+                    }
                 }
             }
 
@@ -252,10 +312,10 @@ class BibleRepository @Inject constructor(
         }
     }
 
+    // #4: StateFlow resets now happen AFTER the transaction completes so there is no
+    // window where dailyTasksFlow sees stale IDs and starts background URI resolution
+    // for lists that are mid-deletion.
     suspend fun resetToDefaults(plan: PresetPlan = PresetPlan.GrantHorner) = withContext(Dispatchers.IO) {
-        // Clear stale cached URIs so old list IDs don't bleed into the new lists
-        resolvedUris.value = emptyMap()
-        resolvingTasks.clear()
         database.withTransaction {
             dao.clearAllBooks()
             dao.clearAllLists()
@@ -264,7 +324,12 @@ class BibleRepository @Inject constructor(
                 dao.createCustomList(ReadingListEntity(listName = name, listOrder = index, listColor = 0), books)
             }
         }
+        // Reset caches only after the transaction is committed
+        resolvedUris.value = emptyMap()
+        resolvingTasks.clear()
         folderCache.evictAll()
+        // Allow freezeActiveTasks to re-freeze the new lists on next launch
+        frozenOnce = false
     }
 
     // Returns the content URI for the Nth audio file (1-based) inside a SAF folder,
@@ -314,6 +379,9 @@ class BibleRepository @Inject constructor(
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("BibleRepo", "resolveChapterFile failed for $folderDocId ch$chapterIndex. Tree: $treeUri", e)
+                    // #2: Cache the failure as an empty list to prevent re-querying a broken
+                    // SAF provider on every dailyTasksFlow emission.
+                    cache?.put(cacheKey, emptyList())
                     return null
                 }
 
