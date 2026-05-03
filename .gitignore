@@ -32,3 +32,8 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Project specific
+bible_assets*/
+sqlite_tmp/
+copy_test_assets.ps1

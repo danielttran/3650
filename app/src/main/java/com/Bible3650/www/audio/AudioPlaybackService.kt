@@ -1,0 +1,79 @@
+package com.Bible3650.www.audio
+
+import android.content.Intent
+import androidx.annotation.OptIn
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
+import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaSession
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
+import dagger.hilt.android.AndroidEntryPoint
+
+@AndroidEntryPoint
+class AudioPlaybackService : MediaLibraryService() {
+    private var mediaLibrarySession: MediaLibrarySession? = null
+    private lateinit var player: ExoPlayer
+
+    @OptIn(UnstableApi::class)
+    override fun onCreate() {
+        super.onCreate()
+        
+        val audioAttributes = AudioAttributes.Builder()
+            .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
+            .setUsage(C.USAGE_MEDIA)
+            .build()
+
+        player = ExoPlayer.Builder(this)
+            .setAudioAttributes(audioAttributes, true)
+            .setHandleAudioBecomingNoisy(true)
+            .setSeekForwardIncrementMs(15000)
+            .setSeekBackIncrementMs(15000)
+            .build()
+
+        val forwardingPlayer = object : ForwardingPlayer(player) {
+            override fun seekToNext() { super.seekToNextMediaItem() }
+            override fun seekToPrevious() { super.seekToPreviousMediaItem() }
+        }
+
+        val callback = object : MediaLibrarySession.Callback {
+            override fun onAddMediaItems(
+                mediaSession: MediaSession,
+                controller: MediaSession.ControllerInfo,
+                mediaItems: MutableList<MediaItem>
+            ): ListenableFuture<MutableList<MediaItem>> {
+                val resolvedItems = mediaItems.map { item ->
+                    item.buildUpon()
+                        .setUri(item.requestMetadata.mediaUri)
+                        .build()
+                }.toMutableList()
+                return Futures.immediateFuture(resolvedItems)
+            }
+        }
+
+        mediaLibrarySession = MediaLibrarySession.Builder(this, forwardingPlayer, callback)
+            .setId("GrantHornerAudioSession")
+            .build()
+    }
+
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo) = mediaLibrarySession
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val activePlayer = mediaLibrarySession?.player
+        if (activePlayer == null || !activePlayer.playWhenReady) {
+            stopSelf()
+        }
+    }
+
+    override fun onDestroy() {
+        mediaLibrarySession?.run {
+            player.release()
+            release()
+        }
+        super.onDestroy()
+    }
+}
