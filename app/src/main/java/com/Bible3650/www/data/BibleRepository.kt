@@ -1,125 +1,176 @@
 package com.Bible3650.www.data
 
-import android.content.Context
+import android.content.ContentResolver
 import android.net.Uri
-import android.util.Log
-import com.Bible3650.www.BuildConfig
+import android.provider.DocumentsContract
+import com.Bible3650.www.data.local.AudioSourceDao
+import com.Bible3650.www.data.local.AudioSourceEntity
 import com.Bible3650.www.data.local.BibleDao
+import com.Bible3650.www.data.local.BookMappingEntity
 import com.Bible3650.www.data.local.DailyTask
 import com.Bible3650.www.data.local.ListWithBooks
-import dagger.hilt.android.qualifiers.ApplicationContext
+import com.Bible3650.www.data.local.ReadingListEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class BibleRepository @Inject constructor(
     val dao: BibleDao,
-    @ApplicationContext private val context: Context
+    val audioSourceDao: AudioSourceDao,
+    private val contentResolver: ContentResolver
 ) {
-    val dailyTasksFlow: Flow<List<DailyTask>> = dao.observeActivePlaylists()
-        .map { lists -> 
-            val allTasks = mutableListOf<DailyTask>()
-            for (offset in 0 until 30) {
-                lists.forEach { listData ->
-                    allTasks.add(resolveDailyTask(listData, offset))
-                }
+    // Reacts to both reading-list changes and active-source changes so the
+    // player always uses the currently selected audio source.
+    val dailyTasksFlow: Flow<List<DailyTask>> = combine(
+        dao.observeActivePlaylists(),
+        audioSourceDao.observeActiveMappings()
+    ) { lists, activeMappings ->
+        val mappingsByBook = activeMappings.associateBy { it.bookName }
+        val activeSource   = audioSourceDao.getActiveSource()
+        val allTasks = mutableListOf<DailyTask>()
+        for (offset in 0 until 30) {
+            lists.forEach { listData ->
+                allTasks.add(resolveDailyTask(listData, offset, mappingsByBook, activeSource))
             }
-            allTasks
         }
-        .flowOn(Dispatchers.IO)
+        allTasks
+    }.flowOn(Dispatchers.IO)
 
     suspend fun initializeDatabaseIfNeeded() {
-        val currentLists = dao.observeActivePlaylists().first()
-        if (currentLists.isEmpty()) {
-            val standardLists = listOf(
-                "List 1: Gospels" to listOf("Matthew", "Mark", "Luke", "John"),
-                "List 2: Pentateuch" to listOf("Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy"),
-                "List 3: Pauline Epistles & Hebrews" to listOf("Romans", "1 Corinthians", "2 Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians", "Hebrews"),
-                "List 4: General Epistles & Revelation" to listOf("1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation"),
-                "List 5: Wisdom" to listOf("Job", "Ecclesiastes", "Song of Songs"),
-                "List 6: Psalms" to listOf("Psalm"),
-                "List 7: Proverbs" to listOf("Proverbs"),
-                "List 8: History" to listOf("Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther"),
-                "List 9: Prophets" to listOf("Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi"),
-                "List 10: Acts" to listOf("Acts")
-            )
-            standardLists.forEachIndexed { index, (listName, books) ->
-                dao.createCustomList(com.Bible3650.www.data.local.ReadingListEntity(listName = listName, listOrder = index), books)
-            }
+        if (dao.observeActivePlaylists().first().isNotEmpty()) return
+        val standardLists = listOf(
+            "List 1: Gospels"                       to listOf("Matthew", "Mark", "Luke", "John"),
+            "List 2: Pentateuch"                    to listOf("Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy"),
+            "List 3: Pauline Epistles & Hebrews"    to listOf("Romans", "1 Corinthians", "2 Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians", "Hebrews"),
+            "List 4: General Epistles & Revelation" to listOf("1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation"),
+            "List 5: Wisdom"                        to listOf("Job", "Ecclesiastes", "Song of Songs"),
+            "List 6: Psalms"                        to listOf("Psalm"),
+            "List 7: Proverbs"                      to listOf("Proverbs"),
+            "List 8: History"                       to listOf("Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther"),
+            "List 9: Prophets"                      to listOf("Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi"),
+            "List 10: Acts"                         to listOf("Acts")
+        )
+        standardLists.forEachIndexed { index, (name, books) ->
+            dao.createCustomList(ReadingListEntity(listName = name, listOrder = index), books)
         }
     }
 
-    private fun resolveDailyTask(listData: ListWithBooks, dayOffset: Int = 0): DailyTask {
+    // ---------------------------------------------------------------------------
+    // Chapter resolution
+    // ---------------------------------------------------------------------------
+
+    private fun resolveDailyTask(
+        listData: ListWithBooks,
+        dayOffset: Int,
+        mappingsByBook: Map<String, BookMappingEntity>,
+        activeSource: AudioSourceEntity?
+    ): DailyTask {
         val books = listData.books.sortedBy { it.sortOrder }
-        val totalChaptersInList = books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
-        
-        if (totalChaptersInList == 0) throw IllegalStateException("List ${listData.readingList.listId} has 0 chapters.")
+        val totalChapters = books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
+        require(totalChapters > 0) { "List ${listData.readingList.listId} has 0 chapters." }
 
-        var normalizedDay = ((listData.readingList.currentDayIndex + dayOffset - 1) % totalChaptersInList) + 1
-        var targetBook = ""
+        var normalizedDay = ((listData.readingList.currentDayIndex + dayOffset - 1) % totalChapters) + 1
+        var targetBook    = ""
         var targetChapter = 0
-        var testament = ""
-
         for (book in books) {
-            val chapterCount = BibleRegistry.getChapterCount(book.bookName)
-            if (normalizedDay <= chapterCount) {
-                targetBook = book.bookName
-                targetChapter = normalizedDay
-                testament = BibleRegistry.getTestament(book.bookName)
-                break
-            }
-            normalizedDay -= chapterCount
+            val count = BibleRegistry.getChapterCount(book.bookName)
+            if (normalizedDay <= count) { targetBook = book.bookName; targetChapter = normalizedDay; break }
+            normalizedDay -= count
         }
 
-        val fileName = "Chapter $targetChapter.mp3"
-        
-        val folderName = BibleRegistry.getBook(targetBook)?.folderName ?: targetBook
-        val filePrefix = BibleRegistry.getBook(targetBook)?.filePrefix ?: targetBook
-        
-        // Pad chapter with 0 to length 2 or 3 depending on padding required (e.g. Psalm needs 3, others 2)
-        val padding = BibleRegistry.getBook(targetBook)?.padding ?: 2
-        val chapterString = targetChapter.toString().padStart(padding, '0')
-        
-        val relativePath = "NIV/$testament/$folderName/${filePrefix} $chapterString.mp3"
-        
-        if (BuildConfig.DEBUG) {
-            validateAssetExists(relativePath)
-        }
-
-        // Format is asset:///NIV/Old%20Testament/...
-        val encodedPath = Uri.encode(relativePath, "/")
-        val absoluteUri = "asset:///$encodedPath"
+        val mapping  = mappingsByBook[targetBook]
+        val fileUri  = if (mapping != null && activeSource != null) {
+            val treeUri = Uri.parse(mapping.overrideTreeUri ?: activeSource.rootTreeUri)
+            resolveChapterFile(treeUri, mapping.folderDocId, targetChapter)?.toString() ?: ""
+        } else ""
 
         return DailyTask(
-            listId = listData.readingList.listId,
-            dayOffset = dayOffset,
-            uniqueId = "${listData.readingList.listId}_$dayOffset",
-            listName = listData.readingList.listName,
-            targetBook = targetBook,
+            listId        = listData.readingList.listId,
+            dayOffset     = dayOffset,
+            uniqueId      = "${listData.readingList.listId}_$dayOffset",
+            listName      = listData.readingList.listName,
+            targetBook    = targetBook,
             targetChapter = targetChapter,
-            fileUri = absoluteUri,
-            isCompleted = listData.readingList.isCompletedToday
+            fileUri       = fileUri,
+            isCompleted   = listData.readingList.isCompletedToday
         )
     }
 
-    private fun validateAssetExists(path: String) {
-        // Simple fast path logic: not exhaustive but catches most
-        val parts = path.split("/")
-        if (parts.size < 3) return
+    // Returns the content URI for the Nth audio file (1-based) inside a SAF folder,
+    // sorted with natural (numeric) ordering so "Chapter 10" follows "Chapter 9".
+    fun resolveChapterFile(treeUri: Uri, folderDocId: String, chapterIndex: Int): Uri? {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, folderDocId)
+        val files = mutableListOf<Pair<String, String>>() // (displayName, docId)
+
         try {
-            val directory = parts.dropLast(1).joinToString("/")
-            val fileName = parts.last()
-            val assetsInDir = context.assets.list(directory)
-            if (assetsInDir?.contains(fileName) != true) {
-                Log.e("AudioBible", "MISSING ASSET: $path")
+            contentResolver.query(
+                childrenUri,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE
+                ),
+                null, null, null
+            )?.use { cursor ->
+                val nameIdx = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val idIdx   = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val mimeIdx = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                while (cursor.moveToNext()) {
+                    val name  = cursor.getString(nameIdx)  ?: continue
+                    val docId = cursor.getString(idIdx)    ?: continue
+                    val mime  = cursor.getString(mimeIdx)  ?: ""
+                    if (mime.startsWith("audio/") || name.endsWithAudioExt()) files.add(name to docId)
+                }
             }
         } catch (e: Exception) {
-             Log.e("AudioBible", "Error checking asset: $path", e)
+            android.util.Log.e("BibleRepo", "resolveChapterFile failed for $folderDocId ch$chapterIndex", e)
+            return null
         }
+
+        files.sortWith(Comparator { a, b -> naturalCompare(a.first, b.first) })
+        val docId = files.getOrNull(chapterIndex - 1)?.second ?: return null
+        return DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+    }
+
+    // ---------------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------------
+
+    private fun String.endsWithAudioExt(): Boolean =
+        endsWith(".mp3",  ignoreCase = true) ||
+        endsWith(".m4a",  ignoreCase = true) ||
+        endsWith(".ogg",  ignoreCase = true) ||
+        endsWith(".flac", ignoreCase = true)
+
+    private fun naturalCompare(a: String, b: String): Int {
+        val aToks = tokenize(a); val bToks = tokenize(b)
+        for (i in 0 until minOf(aToks.size, bToks.size)) {
+            val (aNum, aStr) = aToks[i]; val (bNum, bStr) = bToks[i]
+            val cmp = if (aNum && bNum) aStr.toLong().compareTo(bStr.toLong())
+                      else              aStr.compareTo(bStr, ignoreCase = true)
+            if (cmp != 0) return cmp
+        }
+        return aToks.size.compareTo(bToks.size)
+    }
+
+    private fun tokenize(s: String): List<Pair<Boolean, String>> {
+        val result = mutableListOf<Pair<Boolean, String>>()
+        var i = 0
+        while (i < s.length) {
+            val start = i
+            if (s[i].isDigit()) {
+                while (i < s.length && s[i].isDigit()) i++
+                result.add(true to s.substring(start, i))
+            } else {
+                while (i < s.length && !s[i].isDigit()) i++
+                result.add(false to s.substring(start, i))
+            }
+        }
+        return result
     }
 }

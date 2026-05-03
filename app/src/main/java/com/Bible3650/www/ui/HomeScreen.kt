@@ -39,6 +39,25 @@ fun HomeScreen(
             is DashboardUiState.Loading -> {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             }
+            is DashboardUiState.NoSource -> {
+                Column(
+                    modifier = Modifier.align(Alignment.Center).padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "No audio source linked",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Go to Lists → Audio Sources and browse to a folder containing your audio Bible files.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
             is DashboardUiState.Active -> {
                 Column(modifier = Modifier.fillMaxSize()) {
                     val groupedTasks = uiState.tasks.groupBy { it.dayOffset }

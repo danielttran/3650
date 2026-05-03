@@ -43,21 +43,8 @@ android {
         jvmTarget = "17"
     }
     
-    // =========================================================================
-    // ASSET DEPLOYMENT SETTINGS
-    // =========================================================================
-    // The full audio asset packs total ~4.6GB, which causes Android Studio 
-    // to timeout (300,000ms limit) when deploying over ADB during development.
-    //
-    // For rapid testing: use `:bible_assets_test` (Contains only the first 3 
-    // chapters of each book for instant deployment).
-    //
-    // For final production release: comment out `:bible_assets_test` and 
-    // uncomment the 5 full `:bible_assets_X` packs.
-    // =========================================================================
-    
-    // assetPacks += mutableSetOf(":bible_assets_1", ":bible_assets_2", ":bible_assets_3", ":bible_assets_4", ":bible_assets_5")
-    assetPacks += mutableSetOf(":bible_assets_test")
+    // Audio files are now loaded at runtime from user-selected folders via SAF.
+    // No bundled asset packs are required.
 
     packaging {
         jniLibs {
