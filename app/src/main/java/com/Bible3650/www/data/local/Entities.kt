@@ -76,6 +76,13 @@ interface BibleDao {
     @Query("UPDATE reading_lists SET list_order = :order WHERE listId = :id")
     suspend fun updateListOrder(id: Long, order: Int)
 
+    @Transaction
+    suspend fun reorderLists(listIds: List<Long>) {
+        listIds.forEachIndexed { index, id ->
+            updateListOrder(id, index)
+        }
+    }
+
     @Query("UPDATE reading_lists SET stat_reset_offset = current_absolute_day - 1")
     suspend fun resetAllStats()
 

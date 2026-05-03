@@ -14,6 +14,7 @@ import com.Bible3650.www.data.local.ReadingListEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -25,7 +26,7 @@ class BibleRepository @Inject constructor(
 ) {
     // Shared cache of folder→sorted-docIds so both dailyTasksFlow and
     // playTasks benefit from the same one-time directory scan.
-    internal val folderCache = mutableMapOf<String, List<String>>()
+    internal val folderCache = ConcurrentHashMap<String, List<String>>()
 
     fun clearCache() {
         folderCache.clear()

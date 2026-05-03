@@ -16,7 +16,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.net.Uri
@@ -67,6 +66,18 @@ class AudioControllerManager @Inject constructor(
         initializeController()
     }
 
+    private fun savePosition(p: Player) {
+        val pos = p.currentPosition
+        val id = p.currentMediaItem?.mediaId
+        val editor = prefs.edit()
+        editor.putLong(KEY_POSITION, pos)
+        if (id != null) {
+            editor.putString(KEY_MEDIA_ID, id)
+        }
+        editor.apply()
+        _currentPosition.value = pos
+    }
+
     private fun initializeController() {
         val sessionToken = SessionToken(context, ComponentName(context, AudioPlaybackService::class.java))
         controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
@@ -83,38 +94,18 @@ class AudioControllerManager @Inject constructor(
             }
             _player.value = mediaController
 
-            scope.launch {
-                var lastSavedPosition = 0L
-                while (true) {
-                    _player.value?.let { p ->
-                        if (p.isPlaying) {
-                            val pos = p.currentPosition
-                            _currentPosition.value = pos
-                            _duration.value = p.duration.coerceAtLeast(0L)
-                            if (pos - lastSavedPosition >= 15000L) { // Throttle slightly more to 15s
-                                prefs.edit().putLong(KEY_POSITION, pos).apply()
-                                lastSavedPosition = pos
-                            }
-                        }
-                    }
-                    delay(1000)
-                }
-            }
-
             mediaController.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     _isPlaying.value = isPlaying
                     if (!isPlaying) {
-                        mediaController.currentPosition.let { pos ->
-                            prefs.edit().putLong(KEY_POSITION, pos).apply()
-                            _currentPosition.value = pos
-                        }
+                        savePosition(mediaController)
                     }
                 }
 
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     val id = mediaItem?.mediaId
                     _currentMediaId.value = id
+                    _duration.value = mediaController.duration.coerceAtLeast(0L)
                     if (id != null) {
                         prefs.edit().putString(KEY_MEDIA_ID, id).putLong(KEY_POSITION, 0L).apply()
                     }
@@ -149,12 +140,16 @@ class AudioControllerManager @Inject constructor(
         }, MoreExecutors.directExecutor())
     }
 
+    private var currentPlaylistRequestId: Long = 0
+
     fun playTasks(tasks: List<DailyTask>, startIndex: Int = 0, startPositionMs: Long = androidx.media3.common.C.TIME_UNSET) {
         android.util.Log.d("AudioController", "playTasks: tasks=${tasks.size}, startIndex=$startIndex")
         val player = _player.value ?: run {
             android.util.Log.w("AudioController", "playTasks failed: Player is null")
             return
         }
+
+        val requestId = ++currentPlaylistRequestId
 
         scope.launch(Dispatchers.IO) {
             try {
@@ -164,8 +159,6 @@ class AudioControllerManager @Inject constructor(
                 val mappingsByBook = activeMappings.associateBy { it.bookName }
                 val activeSource   = repository.audioSourceDao.getActiveSource()
 
-                // Reuse the repository's shared folder cache so we don't re-scan
-                // directories that were already scanned for dailyTasksFlow.
                 fun resolveUri(task: DailyTask): Uri? {
                     val mapping = mappingsByBook[task.targetBook] ?: return null
                     if (activeSource == null) return null
@@ -176,6 +169,8 @@ class AudioControllerManager @Inject constructor(
                 val firstUri = resolveUri(firstTask)
 
                 withContext(Dispatchers.Main) {
+                    if (requestId != currentPlaylistRequestId) return@withContext
+                    
                     val firstItem = MediaItem.Builder()
                         .setMediaId(firstTask.uniqueId)
                         .setUri(firstUri)
@@ -191,7 +186,7 @@ class AudioControllerManager @Inject constructor(
                     player.play()
                 }
 
-                // 2. Resolve the rest in background and update playlist
+                // 2. Resolve the rest in background
                 val allMediaItems = tasks.map { task ->
                     val uri = if (task.uniqueId == firstTask.uniqueId) firstUri else resolveUri(task)
                     MediaItem.Builder()
@@ -206,16 +201,15 @@ class AudioControllerManager @Inject constructor(
                 }
 
                 withContext(Dispatchers.Main) {
-                    // Only update the playlist if we are still on the same track
-                    if (player.currentMediaItem?.mediaId == firstTask.uniqueId) {
-                        val before = allMediaItems.take(startIndex)
-                        val after = allMediaItems.drop(startIndex + 1)
-                        
-                        // Append items after current
-                        if (after.isNotEmpty()) player.addMediaItems(after)
-                        // Prepend items before current (index 0 in player right now)
-                        if (before.isNotEmpty()) player.addMediaItems(0, before)
-                    }
+                    if (requestId != currentPlaylistRequestId) return@withContext
+                    
+                    val before = allMediaItems.take(startIndex)
+                    val after = allMediaItems.drop(startIndex + 1)
+                    
+                    // Append items after current
+                    if (after.isNotEmpty()) player.addMediaItems(after)
+                    // Prepend items before current
+                    if (before.isNotEmpty()) player.addMediaItems(0, before)
                 }
             } catch (e: Exception) {
                 android.util.Log.e("AudioController", "Failed to play tasks", e)

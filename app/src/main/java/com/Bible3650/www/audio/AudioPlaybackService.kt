@@ -86,9 +86,11 @@ class AudioPlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         mediaLibrarySession?.run {
+            player.stop()
             player.release()
             release()
         }
+        mediaLibrarySession = null
         super.onDestroy()
     }
 }

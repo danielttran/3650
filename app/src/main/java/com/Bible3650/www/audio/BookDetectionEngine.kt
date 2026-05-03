@@ -101,9 +101,9 @@ class BookDetectionEngine @Inject constructor(
 
         if (audioCount > 0) {
             val normalized = dirName.lowercase()
-                .replace(Regex("[_\\-./\\\\]"), " ")
-                .replace(Regex("\\b0+(?=\\d)"), "")
-                .replace(Regex("\\s+"), " ")
+                .replace(PUNCTUATION_REGEX, " ")
+                .replace(LEADING_ZERO_REGEX, "")
+                .replace(MULTIPLE_SPACES_REGEX, " ")
                 .trim()
             result.add(FolderInfo(dirName, dirDocId, audioCount, normalized))
         }
@@ -221,6 +221,10 @@ class BookDetectionEngine @Inject constructor(
 
     companion object {
         private const val TAG = "BookDetection"
+
+        private val PUNCTUATION_REGEX = Regex("[_\\-./\\\\]")
+        private val LEADING_ZERO_REGEX = Regex("\\b0+(?=\\d)")
+        private val MULTIPLE_SPACES_REGEX = Regex("\\s+")
 
         const val MIN_CONFIDENCE_THRESHOLD = 0.3f
         const val MAX_SCAN_DEPTH = 6

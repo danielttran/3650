@@ -80,8 +80,13 @@ class DashboardViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.initializeDatabaseIfNeeded()
+                
+                // Read from SharedPreferences on IO thread
+                val savedId = audioManager.savedMediaId
+                val savedPos = audioManager.savedPosition
+                
                 withContext(Dispatchers.Main) {
-                    tryRestorePlayback()
+                    tryRestorePlayback(savedId, savedPos)
                 }
             } catch (e: Exception) {
                 android.util.Log.e("DashboardVM", "Initialization failed", e)
@@ -124,9 +129,8 @@ class DashboardViewModel @Inject constructor(
         }
     }
 
-    private suspend fun tryRestorePlayback() {
-        val savedId  = audioManager.savedMediaId ?: return
-        val savedPos = audioManager.savedPosition
+    private suspend fun tryRestorePlayback(savedId: String?, savedPos: Long) {
+        if (savedId == null) return
         
         // Timeout to avoid hanging if controller never connects
         val player = withTimeoutOrNull(5000) {

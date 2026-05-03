@@ -64,9 +64,7 @@ class ManageListsViewModel @Inject constructor(
     fun reorderLists(reorderedLists: List<ReadingListEntity>) {
         viewModelScope.launch {
             try {
-                reorderedLists.forEachIndexed { index, list ->
-                    repository.dao.updateListOrder(list.listId, index)
-                }
+                repository.dao.reorderLists(reorderedLists.map { it.listId })
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error reordering lists", e)
             }
