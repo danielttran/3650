@@ -3,6 +3,7 @@ package com.Bible3650.www.ui
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.Player
 import com.Bible3650.www.audio.AudioControllerManager
 import com.Bible3650.www.data.BibleRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -64,11 +65,12 @@ class DashboardViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             repository.initializeDatabaseIfNeeded()
+            tryRestorePlayback()
         }
 
         viewModelScope.launch {
             audioManager.completedTracks.collect { listId ->
-                repository.dao.updateTaskStatus(listId, true)
+                repository.dao.advanceListDay(listId)
             }
         }
     }
@@ -76,6 +78,26 @@ class DashboardViewModel @Inject constructor(
     val isPlaying: StateFlow<Boolean> = audioManager.isPlaying
     val currentPosition: StateFlow<Long> = audioManager.currentPosition
     val duration: StateFlow<Long> = audioManager.duration
+
+    private suspend fun tryRestorePlayback() {
+        val savedId = audioManager.savedMediaId ?: return
+        val savedPos = audioManager.savedPosition
+
+        // Wait until the player is connected
+        val player = audioManager.player.first { it != null } ?: return
+
+        // Only restore if the player has no media loaded (fresh start / service was killed)
+        if (player.mediaItemCount > 0) return
+        if (player.playbackState != Player.STATE_IDLE) return
+
+        val tasks = repository.dailyTasksFlow.first()
+        val index = tasks.indexOfFirst { it.uniqueId == savedId }
+        if (index == -1) return
+
+        audioManager.playTasks(tasks, index, savedPos)
+        // Pause immediately after loading so we don't auto-start; user resumes manually
+        player.pause()
+    }
 
     fun dispatchAction(action: DashboardAction) {
         when (action) {
