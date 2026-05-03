@@ -72,6 +72,7 @@ class DashboardViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.initializeDatabaseIfNeeded()
+                repository.advanceDayIfNeeded()
                 withContext(Dispatchers.Main) {
                     tryRestorePlayback()
                 }

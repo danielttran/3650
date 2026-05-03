@@ -1,6 +1,8 @@
 package com.Bible3650.www.data
 
 import android.content.ContentResolver
+import android.content.Context
+import android.content.SharedPreferences
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.core.net.toUri
@@ -11,9 +13,11 @@ import com.Bible3650.www.data.local.BookMappingEntity
 import com.Bible3650.www.data.local.DailyTask
 import com.Bible3650.www.data.local.ListWithBooks
 import com.Bible3650.www.data.local.ReadingListEntity
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withTimeoutOrNull
+import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,8 +25,21 @@ import javax.inject.Singleton
 class BibleRepository @Inject constructor(
     val dao: BibleDao,
     val audioSourceDao: AudioSourceDao,
-    private val contentResolver: ContentResolver
+    private val contentResolver: ContentResolver,
+    @ApplicationContext context: Context
 ) {
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("bible_repo_state", Context.MODE_PRIVATE)
+
+    suspend fun advanceDayIfNeeded() {
+        val today = LocalDate.now().toEpochDay()
+        val lastOpened = prefs.getLong("last_opened_day", -1L)
+        if (lastOpened < today) {
+            dao.atomicAdvanceDay()
+            prefs.edit().putLong("last_opened_day", today).apply()
+        }
+    }
+
     private val folderCache = mutableMapOf<String, List<String>>()
 
     // Reacts to both reading-list changes and active-source changes so the
@@ -97,7 +114,7 @@ class BibleRepository @Inject constructor(
                 listName      = listData.readingList.listName,
                 targetBook    = "Empty",
                 targetChapter = 0,
-                isCompleted   = listData.readingList.isCompletedToday
+                isCompleted   = dayOffset == 0 && listData.readingList.isCompletedToday
             )
         }
 
@@ -124,7 +141,7 @@ class BibleRepository @Inject constructor(
             targetBook    = targetBook,
             targetChapter = targetChapter,
             fileUri       = fileUri,
-            isCompleted   = listData.readingList.isCompletedToday
+            isCompleted   = dayOffset == 0 && listData.readingList.isCompletedToday
         )
     }
 
