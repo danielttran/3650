@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -84,8 +85,18 @@ fun ManageListsScreen(
         }
     }
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    var showResetConfirmDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(viewModel) {
+        viewModel.uiEvents.collect { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
     Scaffold(
         modifier = modifier,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButtonPosition = FabPosition.Start,
         floatingActionButton = {
             FloatingActionButton(onClick = {
@@ -101,6 +112,25 @@ fun ManageListsScreen(
             }
         }
     ) { _ ->
+        if (showResetConfirmDialog) {
+            AlertDialog(
+                onDismissRequest = { showResetConfirmDialog = false },
+                title = { Text("Reset to Default Lists?") },
+                text = { Text("This will delete all custom lists and reading progress, and restore the default reading lists. Your audio source mappings will not be deleted. This cannot be undone.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.resetToDefaults()
+                            showResetConfirmDialog = false
+                        }
+                    ) { Text("Reset", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showResetConfirmDialog = false }) { Text("Cancel") }
+                }
+            )
+        }
+
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp),
@@ -158,26 +188,36 @@ fun ManageListsScreen(
             }
 
             item(key = "browse_button") {
-                OutlinedButton(
-                    onClick = { folderPickerLauncher.launch(null) },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = detectionState !is DetectionState.Running
-                ) {
-                    Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Browse for Audio Bible Folder")
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { folderPickerLauncher.launch(null) },
+                        modifier = Modifier.weight(1f),
+                        enabled = detectionState !is DetectionState.Running
+                    ) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Browse Audio")
+                    }
+                    OutlinedButton(
+                        onClick = { showResetConfirmDialog = true },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Reset Lists", color = MaterialTheme.colorScheme.error)
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
             }
 
             // ----------------------------------------------------------------
-            // Reading Lists section
+            // Listening Lists section
             // ----------------------------------------------------------------
             item(key = "lists_title") {
                 HorizontalDivider()
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "Reading Lists",
+                    "Listening Lists",
                     style = MaterialTheme.typography.titleLarge
                 )
                 Spacer(Modifier.height(8.dp))

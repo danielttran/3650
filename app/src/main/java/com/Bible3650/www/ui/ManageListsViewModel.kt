@@ -8,6 +8,8 @@ import com.Bible3650.www.data.ValidationResult
 import com.Bible3650.www.data.local.ListWithBooks
 import com.Bible3650.www.data.local.ReadingListEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -31,12 +33,28 @@ class ManageListsViewModel @Inject constructor(
         ValidationResult(emptyList(), emptyList(), true)
     )
 
+    private val _uiEvents = MutableSharedFlow<String>()
+    val uiEvents = _uiEvents.asSharedFlow()
+
+    fun resetToDefaults() {
+        viewModelScope.launch {
+            try {
+                repository.resetToDefaults()
+                _uiEvents.emit("Lists restored to defaults.")
+            } catch (e: Exception) {
+                android.util.Log.e("ManageListsVM", "Error resetting lists", e)
+                _uiEvents.emit("Failed to reset lists.")
+            }
+        }
+    }
+
     fun deleteList(list: ReadingListEntity) {
         viewModelScope.launch {
             try {
                 repository.dao.deleteList(list)
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error deleting list", e)
+                _uiEvents.emit("Failed to delete list.")
             }
         }
     }
@@ -50,6 +68,7 @@ class ManageListsViewModel @Inject constructor(
                 )
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error creating list", e)
+                _uiEvents.emit("Failed to create list.")
             }
         }
     }
@@ -60,6 +79,7 @@ class ManageListsViewModel @Inject constructor(
                 repository.dao.updateCustomList(list, newBooks)
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error updating list", e)
+                _uiEvents.emit("Failed to update list.")
             }
         }
     }
@@ -70,6 +90,7 @@ class ManageListsViewModel @Inject constructor(
                 repository.dao.reorderLists(reorderedLists.map { it.listId })
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error reordering lists", e)
+                _uiEvents.emit("Failed to reorder lists.")
             }
         }
     }

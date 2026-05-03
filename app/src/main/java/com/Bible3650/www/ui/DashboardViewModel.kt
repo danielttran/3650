@@ -22,7 +22,8 @@ data class TaskUiModel(
     val title: String,
     val subtitle: String,
     val totalChapters: Int,
-    val fileUri: String
+    val fileUri: String,
+    val listColor: Int = 0
 )
 
 sealed interface DashboardUiState {
@@ -72,7 +73,8 @@ class DashboardViewModel @Inject constructor(
                 title         = task.listName,
                 subtitle      = "${task.targetBook} ${task.targetChapter}",
                 totalChapters = task.totalChapters,
-                fileUri       = task.fileUri
+                fileUri       = task.fileUri,
+                listColor     = task.listColor
             )
         }
         DashboardUiState.Active(mappedTasks)
@@ -116,8 +118,7 @@ class DashboardViewModel @Inject constructor(
 
             val startIndex = updatedTasks.indexOfFirst { it.uniqueId == currentId }
             if (startIndex != -1) {
-                val playlist = updatedTasks.drop(startIndex) + updatedTasks.take(startIndex)
-                audioManager.playTasks(playlist, 0)
+                audioManager.playTasks(updatedTasks, startIndex)
             }
         }
     }
@@ -137,10 +138,7 @@ class DashboardViewModel @Inject constructor(
         val index = tasks.indexOfFirst { it.uniqueId == savedId }
         if (index == -1) return
 
-        // Reorder so the saved track is at index 0; prevents prepending items at index 0
-        // into an active ExoPlayer timeline which shifts currentMediaItemIndex.
-        val playlist = tasks.drop(index) + tasks.take(index)
-        audioManager.playTasks(playlist, 0, savedPos)
+        audioManager.playTasks(tasks, index, savedPos)
         player.pause()
     }
 
@@ -172,10 +170,7 @@ class DashboardViewModel @Inject constructor(
                     val tasks = repository.dailyTasksFlow.first()
                     val startIndex = tasks.indexOfFirst { it.uniqueId == action.taskId }
                     if (startIndex == -1) return@launch
-                    // Wrap playlist so tapped item plays first, then remaining tasks,
-                    // then loops back to the beginning of today's list.
-                    val playlist = tasks.drop(startIndex) + tasks.take(startIndex)
-                    audioManager.playTasks(playlist, 0)
+                    audioManager.playTasks(tasks, startIndex)
                 }
             }
             is DashboardAction.PlayPause -> audioManager.togglePlayPause()

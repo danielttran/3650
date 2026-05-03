@@ -144,7 +144,7 @@ fun ProfileScreen(
             }
 
             Text(
-                text = "Books Completed",
+                text = "Books Completed Stats",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
@@ -167,9 +167,13 @@ fun ProfileScreen(
                         stat.listColor != 0 -> Color(stat.listColor)
                         else -> MaterialTheme.colorScheme.surfaceVariant
                     }
+                    val contentColor = when {
+                        stat.listColor != 0 -> Color(0xFF1E1E1E) // Dark gray/black text
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
                     Card(
                         shape = RoundedCornerShape(8.dp),
-                        colors = CardDefaults.cardColors(containerColor = cardColor)
+                        colors = CardDefaults.cardColors(containerColor = cardColor, contentColor = contentColor)
                     ) {
                         Column(
                             modifier = Modifier
@@ -188,9 +192,9 @@ fun ProfileScreen(
                                 text = "(${stat.readCount})",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (stat.readCount > 0)
-                                    MaterialTheme.colorScheme.primary
+                                    if (stat.listColor != 0) Color.Black else MaterialTheme.colorScheme.primary
                                 else
-                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                    if (stat.listColor != 0) Color(0xFF1E1E1E).copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -202,7 +206,7 @@ fun ProfileScreen(
         AlertDialog(
             onDismissRequest = { showImportConfirm = false },
             title = { Text("Restore Progress?") },
-            text = { Text("This will overwrite your current reading lists and all statistics. This action cannot be undone.") },
+            text = { Text("This will overwrite your current Listening Lists and all statistics. This action cannot be undone.") },
             confirmButton = {
                 TextButton(
                     onClick = {

@@ -15,6 +15,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -114,13 +115,9 @@ private fun MiniPlayerBar(
     modifier: Modifier = Modifier
 ) {
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
-    val currentPosition by viewModel.currentPosition.collectAsStateWithLifecycle()
     val duration by viewModel.duration.collectAsStateWithLifecycle()
 
     if (playingTask == null && !isPlaying) return
-
-    val progress = if (duration > 0) (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
-    val timeRemaining = remember(duration, currentPosition) { formatTimeRemaining(duration - currentPosition) }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -130,12 +127,7 @@ private fun MiniPlayerBar(
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
     ) {
         Column {
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier.fillMaxWidth().height(6.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-            )
+            PlayerProgressBar(duration = duration, viewModel = viewModel)
 
             Row(
                 modifier = Modifier
@@ -157,16 +149,7 @@ private fun MiniPlayerBar(
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1
                     )
-                }
-
-                if (duration > 0) {
-                    Text(
-                        timeRemaining,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(end = 12.dp)
-                    )
+                    TimeRemainingText(duration = duration, viewModel = viewModel)
                 }
 
                 IconButton(
@@ -211,6 +194,33 @@ private fun formatTimeRemaining(remainingMs: Long): String {
 }
 
 @Composable
+private fun PlayerProgressBar(duration: Long, viewModel: DashboardViewModel) {
+    val currentPosition by viewModel.currentPosition.collectAsStateWithLifecycle()
+    val progress = if (duration > 0) (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
+    LinearProgressIndicator(
+        progress = { progress },
+        modifier = Modifier.fillMaxWidth().height(6.dp),
+        color = MaterialTheme.colorScheme.primary,
+        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+    )
+}
+
+@Composable
+private fun TimeRemainingText(duration: Long, viewModel: DashboardViewModel) {
+    val currentPosition by viewModel.currentPosition.collectAsStateWithLifecycle()
+    val timeRemaining = remember(duration, currentPosition) { formatTimeRemaining(duration - currentPosition) }
+    if (duration > 0) {
+        Text(
+            text = timeRemaining,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
 fun ListEntryItem(
     task: TaskUiModel,
     isPlaying: Boolean,
@@ -218,12 +228,37 @@ fun ListEntryItem(
     onDecrement: () -> Unit,
     onIncrement: () -> Unit
 ) {
+    val listColor = if (task.listColor != 0) Color(task.listColor) else null
+    
+    val backgroundColor = when {
+        isPlaying && listColor != null -> listColor.copy(alpha = 0.85f)
+        isPlaying -> MaterialTheme.colorScheme.primaryContainer
+        listColor != null -> listColor.copy(alpha = 0.35f)
+        else -> MaterialTheme.colorScheme.surface
+    }
+
+    val titleColor = when {
+        isPlaying && listColor != null -> Color.Black
+        isPlaying -> MaterialTheme.colorScheme.primary
+        listColor != null -> Color.Black
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+
+    val subtitleColor = when {
+        listColor != null -> Color.Black.copy(alpha = 0.7f)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    val iconColor = when {
+        listColor != null -> Color.Black.copy(alpha = 0.7f)
+        else -> MaterialTheme.colorScheme.primary
+    }
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onPlayClick() },
-        color = if (isPlaying) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surface,
+        color = backgroundColor,
     ) {
         Box {
             Row(
@@ -237,14 +272,14 @@ fun ListEntryItem(
                         Text(
                             text = "${task.title} (${task.totalChapters})",
                             style = MaterialTheme.typography.titleMedium,
-                            color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            color = titleColor
                         )
                         if (isPlaying) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 "Now Playing",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = titleColor,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -252,18 +287,18 @@ fun ListEntryItem(
                     Text(
                         text = task.subtitle,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = subtitleColor
                     )
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onDecrement) {
                         Icon(Icons.Default.ChevronLeft, contentDescription = "Previous",
-                             tint = MaterialTheme.colorScheme.primary)
+                             tint = iconColor)
                     }
                     IconButton(onClick = onIncrement) {
                         Icon(Icons.Default.ChevronRight, contentDescription = "Next",
-                             tint = MaterialTheme.colorScheme.primary)
+                             tint = iconColor)
                     }
                 }
             }

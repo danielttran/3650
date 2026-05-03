@@ -11,7 +11,8 @@ data class DailyTask(
     val targetBook: String,
     val targetChapter: Int,
     val totalChapters: Int = 0,
-    val fileUri: String = ""
+    val fileUri: String = "",
+    val listColor: Int = 0
 )
 
 @Entity(

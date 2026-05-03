@@ -183,6 +183,24 @@ class AudioControllerManager @Inject constructor(
             return
         }
 
+        // Check if the current playlist already matches `tasks`
+        if (tasks.isNotEmpty() && player.mediaItemCount == tasks.size) {
+            var isMatch = true
+            for (i in tasks.indices) {
+                if (player.getMediaItemAt(i).mediaId != tasks[i].uniqueId) {
+                    isMatch = false
+                    break
+                }
+            }
+            if (isMatch) {
+                // Playlist matches! Just seek to the required index
+                val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs else 0L
+                player.seekTo(startIndex, startPos)
+                player.play()
+                return
+            }
+        }
+
         val requestId = ++currentPlaylistRequestId
 
         scope.launch(Dispatchers.IO) {

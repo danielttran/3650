@@ -22,6 +22,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import androidx.room.withTransaction
+import com.Bible3650.www.data.local.AppDatabase
 
 private const val MAX_FOLDER_CACHE_ENTRIES = 100
 
@@ -30,17 +32,22 @@ private val DEFAULT_LIST_COLOR_INTS = listOf(
     0xFFCFE2F3.toInt(), 0xFFD5E8D4.toInt(), 0xFFFFE6CC.toInt(), 0xFFE1D5E7.toInt(),
     0xFFFFF2CC.toInt(), 0xFFF8D7DA.toInt(), 0xFFD4EDDA.toInt(), 0xFFFDE8D4.toInt(),
     0xFFD1ECF1.toInt(), 0xFFE8D5E0.toInt(), 0xFFD5E5F5.toInt(), 0xFFF5ECD7.toInt(),
+    0xFFE2F0CB.toInt(), 0xFFFFB7B2.toInt(), 0xFFE0BBE4.toInt(), 0xFF957DAD.toInt(),
+    0xFFD291BC.toInt(), 0xFFFEC8D8.toInt(), 0xFFFFDFD3.toInt(), 0xFFA8E6CF.toInt(),
+    0xFFDCEDC1.toInt(), 0xFFFFD3B6.toInt(), 0xFFFFAAA5.toInt(), 0xFFFF8B94.toInt(),
+    0xFFB5EAD7.toInt(), 0xFFC7CEEA.toInt()
 )
 
 @Singleton
 class BibleRepository @Inject constructor(
+    private val database: AppDatabase,
     val dao: BibleDao,
     val audioSourceDao: AudioSourceDao,
     private val contentResolver: ContentResolver
 ) {
     // Shared cache of folder→sorted-docIds so both dailyTasksFlow and
     // playTasks benefit from the same one-time directory scan.
-    internal val folderCache = ConcurrentHashMap<String, List<String>>()
+    internal val folderCache = android.util.LruCache<String, List<String>>(MAX_FOLDER_CACHE_ENTRIES)
 
     private val repoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -67,7 +74,7 @@ class BibleRepository @Inject constructor(
     }
 
     fun clearCache() {
-        folderCache.clear()
+        folderCache.evictAll()
     }
 
     val dailyTasksFlow: Flow<List<DailyTask>> = combine(
@@ -93,6 +100,10 @@ class BibleRepository @Inject constructor(
         } != null
         if (hasData) return
 
+        insertDefaultLists()
+    }
+
+    private suspend fun insertDefaultLists() {
         val standardLists = listOf(
             "List 1: Gospels"                       to listOf("Matthew", "Mark", "Luke", "John"),
             "List 2: Pentateuch"                    to listOf("Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy"),
@@ -106,7 +117,7 @@ class BibleRepository @Inject constructor(
             "List 10: Acts"                         to listOf("Acts")
         )
         standardLists.forEachIndexed { index, (name, books) ->
-            val color = DEFAULT_LIST_COLOR_INTS.getOrElse(index) { 0 }
+            val color = DEFAULT_LIST_COLOR_INTS.random()
             dao.createCustomList(ReadingListEntity(listName = name, listOrder = index, listColor = color), books)
         }
     }
@@ -160,7 +171,8 @@ class BibleRepository @Inject constructor(
             targetBook    = targetBook,
             targetChapter = targetChapter,
             totalChapters = totalChapters,
-            fileUri       = fileUri
+            fileUri       = fileUri,
+            listColor     = list.listColor
         )
     }
 
@@ -220,33 +232,40 @@ class BibleRepository @Inject constructor(
         } ?: return@withContext false
 
         try {
-            // We use a simple sequential clear/insert here.
-            // In a full production app, we would wrap this in a single DB transaction
-            // across both DAOs using database.runInTransaction {}.
+            database.withTransaction {
+                dao.clearAllBooks()
+                dao.clearAllLists()
+                audioSourceDao.clearAllMappings()
+                audioSourceDao.clearAllSources()
 
-            dao.clearAllBooks()
-            dao.clearAllLists()
-            audioSourceDao.clearAllMappings()
-            audioSourceDao.clearAllSources()
+                backup.readingLists.forEach { rb ->
+                    val list = rb.entity.copy(listId = 0)
+                    val newId = dao.insertList(list)
+                    dao.insertBooks(rb.books.map { it.copy(id = 0, listId = newId) })
+                }
 
-            backup.readingLists.forEach { rb ->
-                val list = rb.entity.copy(listId = 0)
-                val newId = dao.insertList(list)
-                dao.insertBooks(rb.books.map { it.copy(id = 0, listId = newId) })
+                backup.audioSources.forEach { sb ->
+                    val source = sb.entity.copy(sourceId = 0)
+                    val newId = audioSourceDao.insertSource(source)
+                    audioSourceDao.upsertMappings(sb.mappings.map { it.copy(sourceId = newId) })
+                }
             }
 
-            backup.audioSources.forEach { sb ->
-                val source = sb.entity.copy(sourceId = 0)
-                val newId = audioSourceDao.insertSource(source)
-                audioSourceDao.upsertMappings(sb.mappings.map { it.copy(sourceId = newId) })
-            }
-
-            folderCache.clear()
+            folderCache.evictAll()
             true
         } catch (e: Exception) {
             android.util.Log.e("BibleRepo", "Database restoration failed", e)
             false
         }
+    }
+
+    suspend fun resetToDefaults() = withContext(Dispatchers.IO) {
+        database.withTransaction {
+            dao.clearAllBooks()
+            dao.clearAllLists()
+            insertDefaultLists()
+        }
+        folderCache.evictAll()
     }
 
     // Returns the content URI for the Nth audio file (1-based) inside a SAF folder,
@@ -255,7 +274,7 @@ class BibleRepository @Inject constructor(
         treeUri: Uri,
         folderDocId: String,
         chapterIndex: Int,
-        cache: MutableMap<String, List<String>>? = null
+        cache: android.util.LruCache<String, List<String>>? = null
     ): Uri? {
         val cacheKey = "${treeUri}::${folderDocId}"
         val cachedFiles = cache?.get(cacheKey)
@@ -306,8 +325,7 @@ class BibleRepository @Inject constructor(
                     .map { it.second to tokenize(it.first) }
                     .sortedWith { a, b -> compareTokens(a.second, b.second) }
                     .map { it.first }
-                // Evict cache entirely when it grows too large to cap memory usage
-                if (cache != null && cache.size >= MAX_FOLDER_CACHE_ENTRIES) cache.clear()
+                // LruCache automatically evicts oldest entries when exceeding max size
                 cache?.put(cacheKey, sorted)
                 sorted
             }
