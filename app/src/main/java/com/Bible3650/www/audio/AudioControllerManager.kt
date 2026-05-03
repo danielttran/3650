@@ -16,7 +16,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -174,7 +173,12 @@ class AudioControllerManager @Inject constructor(
 
     private var currentPlaylistRequestId: Long = 0
 
-    fun playTasks(tasks: List<DailyTask>, startIndex: Int = 0, startPositionMs: Long = androidx.media3.common.C.TIME_UNSET) {
+    fun playTasks(
+        tasks: List<DailyTask>,
+        startIndex: Int = 0,
+        startPositionMs: Long = androidx.media3.common.C.TIME_UNSET,
+        playWhenReady: Boolean = true
+    ) {
         android.util.Log.d("AudioController", "playTasks: tasks=${tasks.size}, startIndex=$startIndex")
         val player = _player.value ?: run {
             // Attempt to reconnect if a previous release cleared the controller
@@ -196,7 +200,7 @@ class AudioControllerManager @Inject constructor(
                 // Playlist matches! Just seek to the required index
                 val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs else 0L
                 player.seekTo(startIndex, startPos)
-                player.play()
+                if (playWhenReady) player.play() else player.pause()
                 return
             }
         }
@@ -211,7 +215,7 @@ class AudioControllerManager @Inject constructor(
                 val mappingsByBook = activeMappings.associateBy { it.bookName }
                 val activeSource   = repository.audioSourceDao.getActiveSource()
 
-                fun resolveUri(task: DailyTask): Uri? {
+                suspend fun resolveUri(task: DailyTask): Uri? {
                     val mapping = mappingsByBook[task.targetBook] ?: return null
                     if (activeSource == null) return null
                     val treeUri = (mapping.overrideTreeUri ?: activeSource.rootTreeUri).toUri()
@@ -235,21 +239,24 @@ class AudioControllerManager @Inject constructor(
                     player.setMediaItem(firstItem)
                     if (startPositionMs != androidx.media3.common.C.TIME_UNSET) player.seekTo(startPositionMs)
                     player.prepare()
-                    player.play()
+                    if (playWhenReady) player.play() else player.pause()
                 }
 
                 // 2. Resolve the rest in background
-                val allMediaItems = tasks.map { task ->
+                val allMediaItems = mutableListOf<MediaItem>()
+                for (task in tasks) {
                     val uri = if (task.uniqueId == firstTask.uniqueId) firstUri else resolveUri(task)
-                    MediaItem.Builder()
-                        .setMediaId(task.uniqueId)
-                        .setUri(uri)
-                        .setRequestMetadata(
-                            MediaItem.RequestMetadata.Builder()
-                                .setMediaUri(uri)
-                                .build()
-                        )
-                        .build()
+                    allMediaItems.add(
+                        MediaItem.Builder()
+                            .setMediaId(task.uniqueId)
+                            .setUri(uri)
+                            .setRequestMetadata(
+                                MediaItem.RequestMetadata.Builder()
+                                    .setMediaUri(uri)
+                                    .build()
+                            )
+                            .build()
+                    )
                 }
 
                 withContext(Dispatchers.Main) {
@@ -275,7 +282,10 @@ class AudioControllerManager @Inject constructor(
 
     fun togglePlayPause() {
         val player = _player.value ?: return
-        if (player.isPlaying) {
+        if (player.playbackState == Player.STATE_ENDED) {
+            player.seekTo(0, 0L)
+            player.play()
+        } else if (player.isPlaying) {
             player.pause()
         } else {
             player.play()

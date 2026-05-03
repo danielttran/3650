@@ -51,7 +51,22 @@ fun Bible3650App(dashboardViewModel: DashboardViewModel) {
 
     val snackbarHostState = remember { SnackbarHostState() }
 
+    val requestPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        
         dashboardViewModel.uiEvents.collect { event ->
             when (event) {
                 is DashboardUiEvent.ShowSnackbar -> {

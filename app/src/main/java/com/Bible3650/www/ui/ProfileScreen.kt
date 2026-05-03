@@ -151,7 +151,7 @@ fun ProfileScreen(
             )
 
             LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
+                columns = GridCells.Adaptive(minSize = 100.dp),
                 contentPadding = PaddingValues(
                     start = 16.dp,
                     end = 16.dp,

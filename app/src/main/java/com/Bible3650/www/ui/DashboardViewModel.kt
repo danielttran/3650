@@ -1,6 +1,7 @@
 package com.Bible3650.www.ui
 
 import androidx.compose.runtime.Immutable
+import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
@@ -83,7 +84,7 @@ class DashboardViewModel @Inject constructor(
     init {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                repository.initializeDatabaseIfNeeded()
+                repository.initializeDatabaseIfNeeded(ListColorPalette.map { it.toArgb() })
 
                 // Read from SharedPreferences on IO thread
                 val savedId = audioManager.savedMediaId
@@ -138,8 +139,7 @@ class DashboardViewModel @Inject constructor(
         val index = tasks.indexOfFirst { it.uniqueId == savedId }
         if (index == -1) return
 
-        audioManager.playTasks(tasks, index, savedPos)
-        player.pause()
+        audioManager.playTasks(tasks, index, savedPos, playWhenReady = false)
     }
 
     fun dispatchAction(action: DashboardAction) {

@@ -17,6 +17,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
@@ -26,17 +28,6 @@ import androidx.room.withTransaction
 import com.Bible3650.www.data.local.AppDatabase
 
 private const val MAX_FOLDER_CACHE_ENTRIES = 100
-
-// ARGB Int values matching ListColorPalette in the UI layer (avoids importing Compose in data layer)
-private val DEFAULT_LIST_COLOR_INTS = listOf(
-    0xFFCFE2F3.toInt(), 0xFFD5E8D4.toInt(), 0xFFFFE6CC.toInt(), 0xFFE1D5E7.toInt(),
-    0xFFFFF2CC.toInt(), 0xFFF8D7DA.toInt(), 0xFFD4EDDA.toInt(), 0xFFFDE8D4.toInt(),
-    0xFFD1ECF1.toInt(), 0xFFE8D5E0.toInt(), 0xFFD5E5F5.toInt(), 0xFFF5ECD7.toInt(),
-    0xFFE2F0CB.toInt(), 0xFFFFB7B2.toInt(), 0xFFE0BBE4.toInt(), 0xFF957DAD.toInt(),
-    0xFFD291BC.toInt(), 0xFFFEC8D8.toInt(), 0xFFFFDFD3.toInt(), 0xFFA8E6CF.toInt(),
-    0xFFDCEDC1.toInt(), 0xFFFFD3B6.toInt(), 0xFFFFAAA5.toInt(), 0xFFFF8B94.toInt(),
-    0xFFB5EAD7.toInt(), 0xFFC7CEEA.toInt()
-)
 
 @Singleton
 class BibleRepository @Inject constructor(
@@ -48,6 +39,7 @@ class BibleRepository @Inject constructor(
     // Shared cache of folder→sorted-docIds so both dailyTasksFlow and
     // playTasks benefit from the same one-time directory scan.
     internal val folderCache = android.util.LruCache<String, List<String>>(MAX_FOLDER_CACHE_ENTRIES)
+    private val cacheMutexes = ConcurrentHashMap<String, Mutex>()
 
     private val repoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -94,16 +86,16 @@ class BibleRepository @Inject constructor(
         }
         .flowOn(Dispatchers.IO)
 
-    suspend fun initializeDatabaseIfNeeded() {
+    suspend fun initializeDatabaseIfNeeded(defaultColors: List<Int>) {
         val hasData = withTimeoutOrNull(3000) {
             dao.observeActivePlaylists().first { it.isNotEmpty() }
         } != null
         if (hasData) return
 
-        insertDefaultLists()
+        insertDefaultLists(defaultColors)
     }
 
-    private suspend fun insertDefaultLists() {
+    private suspend fun insertDefaultLists(defaultColors: List<Int>) {
         val standardLists = listOf(
             "List 1: Gospels"                       to listOf("Matthew", "Mark", "Luke", "John"),
             "List 2: Pentateuch"                    to listOf("Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy"),
@@ -117,7 +109,7 @@ class BibleRepository @Inject constructor(
             "List 10: Acts"                         to listOf("Acts")
         )
         standardLists.forEachIndexed { index, (name, books) ->
-            val color = DEFAULT_LIST_COLOR_INTS.random()
+            val color = defaultColors.random()
             dao.createCustomList(ReadingListEntity(listName = name, listOrder = index, listColor = color), books)
         }
     }
@@ -259,75 +251,79 @@ class BibleRepository @Inject constructor(
         }
     }
 
-    suspend fun resetToDefaults() = withContext(Dispatchers.IO) {
+    suspend fun resetToDefaults(defaultColors: List<Int>) = withContext(Dispatchers.IO) {
         database.withTransaction {
             dao.clearAllBooks()
             dao.clearAllLists()
-            insertDefaultLists()
+            insertDefaultLists(defaultColors)
         }
         folderCache.evictAll()
     }
 
     // Returns the content URI for the Nth audio file (1-based) inside a SAF folder,
     // sorted with natural (numeric) ordering so "Chapter 10" follows "Chapter 9".
-    fun resolveChapterFile(
+    suspend fun resolveChapterFile(
         treeUri: Uri,
         folderDocId: String,
         chapterIndex: Int,
         cache: android.util.LruCache<String, List<String>>? = null
     ): Uri? {
         val cacheKey = "${treeUri}::${folderDocId}"
-        val cachedFiles = cache?.get(cacheKey)
-        val sortedDocIds = if (cachedFiles != null) {
-            cachedFiles
-        } else {
-            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, folderDocId)
-            val files = mutableListOf<Pair<String, String>>() // (displayName, docId)
+        val mutex = cacheMutexes.getOrPut(cacheKey) { Mutex() }
 
-            try {
-                contentResolver.query(
-                    childrenUri,
-                    arrayOf(
-                        DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                        DocumentsContract.Document.COLUMN_MIME_TYPE
-                    ),
-                    null, null, null
-                )?.use { cursor ->
-                    val nameIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                    val idIdx   = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                    val mimeIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
-
-                    if (nameIdx == -1 || (idIdx == -1) || (mimeIdx == -1)) {
-                        android.util.Log.e("BibleRepo", "Required columns missing in query")
-                        return@use
-                    }
-
-                    while (cursor.moveToNext()) {
-                        val name  = cursor.getString(nameIdx)  ?: continue
-                        val docId = cursor.getString(idIdx)    ?: continue
-                        val mime  = cursor.getString(mimeIdx)  ?: ""
-                        if (mime.startsWith("audio/") || name.endsWithAudioExt()) files.add(name to docId)
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("BibleRepo", "resolveChapterFile failed for $folderDocId ch$chapterIndex. Tree: $treeUri", e)
-                return null
-            }
-
-            if (files.isEmpty()) {
-                android.util.Log.w("BibleRepo", "No audio files found in $folderDocId")
-                val empty = emptyList<String>()
-                cache?.put(cacheKey, empty)
-                empty
+        val sortedDocIds = mutex.withLock {
+            val cachedFiles = cache?.get(cacheKey)
+            if (cachedFiles != null) {
+                cachedFiles
             } else {
-                val sorted = files
-                    .map { it.second to tokenize(it.first) }
-                    .sortedWith { a, b -> compareTokens(a.second, b.second) }
-                    .map { it.first }
-                // LruCache automatically evicts oldest entries when exceeding max size
-                cache?.put(cacheKey, sorted)
-                sorted
+                val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, folderDocId)
+                val files = mutableListOf<Pair<String, String>>() // (displayName, docId)
+
+                try {
+                    contentResolver.query(
+                        childrenUri,
+                        arrayOf(
+                            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                            DocumentsContract.Document.COLUMN_MIME_TYPE
+                        ),
+                        null, null, null
+                    )?.use { cursor ->
+                        val nameIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                        val idIdx   = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                        val mimeIdx = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+
+                        if (nameIdx == -1 || (idIdx == -1) || (mimeIdx == -1)) {
+                            android.util.Log.e("BibleRepo", "Required columns missing in query")
+                            return@use
+                        }
+
+                        while (cursor.moveToNext()) {
+                            val name  = cursor.getString(nameIdx)  ?: continue
+                            val docId = cursor.getString(idIdx)    ?: continue
+                            val mime  = cursor.getString(mimeIdx)  ?: ""
+                            if (mime.startsWith("audio/") || name.endsWithAudioExt()) files.add(name to docId)
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("BibleRepo", "resolveChapterFile failed for $folderDocId ch$chapterIndex. Tree: $treeUri", e)
+                    return null
+                }
+
+                if (files.isEmpty()) {
+                    android.util.Log.w("BibleRepo", "No audio files found in $folderDocId")
+                    val empty = emptyList<String>()
+                    cache?.put(cacheKey, empty)
+                    empty
+                } else {
+                    val sorted = files
+                        .map { it.second to tokenize(it.first) }
+                        .sortedWith { a, b -> compareTokens(a.second, b.second) }
+                        .map { it.first }
+                    // LruCache automatically evicts oldest entries when exceeding max size
+                    cache?.put(cacheKey, sorted)
+                    sorted
+                }
             }
         }
 

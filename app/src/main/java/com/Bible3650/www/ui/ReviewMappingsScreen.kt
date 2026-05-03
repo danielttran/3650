@@ -19,8 +19,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.Bible3650.www.R
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -147,6 +149,8 @@ fun ReviewMappingsScreen(
 
     // Holds the book name currently awaiting a folder pick
     var pendingBook by remember { mutableStateOf<String?>(null) }
+    var isCountingFilesFor by remember { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
 
     val folderPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -156,9 +160,14 @@ fun ReviewMappingsScreen(
                 uri,
                 android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
-            // Count audio files in the picked folder to confirm it's the right one
-            val fileCount = countAudioFilesInTree(context.contentResolver, uri)
-            viewModel.onManualBookFolderPicked(pendingBook!!, uri, fileCount)
+            val book = pendingBook!!
+            isCountingFilesFor = book
+            coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                // Count audio files in the picked folder to confirm it's the right one
+                val fileCount = countAudioFilesInTree(context.contentResolver, uri)
+                viewModel.onManualBookFolderPicked(book, uri, fileCount)
+                isCountingFilesFor = null
+            }
         }
         pendingBook = null
     }
@@ -181,7 +190,7 @@ fun ReviewMappingsScreen(
                     }
                     Column {
                         Text(
-                            state.source?.displayName ?: "Review Mappings",
+                            state.source?.displayName ?: stringResource(R.string.title_review_mappings),
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
@@ -225,6 +234,7 @@ fun ReviewMappingsScreen(
             items(state.rows, key = { it.bookName }) { row ->
                 MappingRow(
                     row = row,
+                    isCounting = isCountingFilesFor == row.bookName,
                     onPickFolder = {
                         pendingBook = row.bookName
                         folderPickerLauncher.launch(null)
@@ -236,7 +246,7 @@ fun ReviewMappingsScreen(
 }
 
 @Composable
-private fun MappingRow(row: MappingRowUi, onPickFolder: () -> Unit) {
+private fun MappingRow(row: MappingRowUi, isCounting: Boolean, onPickFolder: () -> Unit) {
     val (iconTint, containerColor) = when {
         !row.isMapped       -> MaterialTheme.colorScheme.error to
                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
@@ -279,9 +289,13 @@ private fun MappingRow(row: MappingRowUi, onPickFolder: () -> Unit) {
                          color = MaterialTheme.colorScheme.error)
                 }
             }
-            IconButton(onClick = onPickFolder) {
-                Icon(Icons.Default.Edit, contentDescription = "Pick folder",
-                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (isCounting) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+            } else {
+                IconButton(onClick = onPickFolder) {
+                    Icon(Icons.Default.Edit, contentDescription = "Pick folder",
+                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }

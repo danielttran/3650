@@ -1,5 +1,6 @@
 package com.Bible3650.www.ui
 
+import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.Bible3650.www.data.BibleRepository
@@ -39,7 +40,7 @@ class ManageListsViewModel @Inject constructor(
     fun resetToDefaults() {
         viewModelScope.launch {
             try {
-                repository.resetToDefaults()
+                repository.resetToDefaults(ListColorPalette.map { it.toArgb() })
                 _uiEvents.emit("Lists restored to defaults.")
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error resetting lists", e)
