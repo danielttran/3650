@@ -72,6 +72,9 @@ interface BibleDao {
     @Query("SELECT * FROM reading_lists ORDER BY list_order ASC, created_at ASC")
     fun observeActivePlaylists(): Flow<List<ListWithBooks>>
 
+    @Query("SELECT MAX(list_order) FROM reading_lists")
+    suspend fun getMaxListOrder(): Int?
+
     @Transaction
     @Query("SELECT * FROM reading_lists")
     suspend fun getAllLists(): List<ListWithBooks>

@@ -40,7 +40,7 @@ class ManageListsViewModel @Inject constructor(
     fun resetToDefaults() {
         viewModelScope.launch {
             try {
-                repository.resetToDefaults(ListColorPalette.map { it.toArgb() })
+                repository.resetToDefaults()
                 _uiEvents.emit("Lists restored to defaults.")
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error resetting lists", e)
@@ -63,8 +63,9 @@ class ManageListsViewModel @Inject constructor(
     fun createList(name: String, books: List<String>, colorArgb: Int) {
         viewModelScope.launch {
             try {
+                val maxOrder = repository.dao.getMaxListOrder() ?: -1
                 repository.dao.createCustomList(
-                    ReadingListEntity(listName = name, listColor = colorArgb),
+                    ReadingListEntity(listName = name, listColor = colorArgb, listOrder = maxOrder + 1),
                     books
                 )
             } catch (e: Exception) {

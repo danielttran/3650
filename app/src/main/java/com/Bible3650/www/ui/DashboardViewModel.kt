@@ -84,7 +84,7 @@ class DashboardViewModel @Inject constructor(
     init {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                repository.initializeDatabaseIfNeeded(ListColorPalette.map { it.toArgb() })
+                repository.initializeDatabaseIfNeeded()
 
                 // Read from SharedPreferences on IO thread
                 val savedId = audioManager.savedMediaId

@@ -304,7 +304,5 @@ class AudioControllerManager @Inject constructor(
         _player.value = null
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null
-        // Reinitialize so the controller is ready when the service next starts
-        initializeController()
     }
 }

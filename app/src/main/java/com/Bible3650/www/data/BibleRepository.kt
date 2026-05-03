@@ -67,6 +67,7 @@ class BibleRepository @Inject constructor(
 
     fun clearCache() {
         folderCache.evictAll()
+        cacheMutexes.clear()
     }
 
     val dailyTasksFlow: Flow<List<DailyTask>> = combine(
@@ -86,16 +87,16 @@ class BibleRepository @Inject constructor(
         }
         .flowOn(Dispatchers.IO)
 
-    suspend fun initializeDatabaseIfNeeded(defaultColors: List<Int>) {
+    suspend fun initializeDatabaseIfNeeded() {
         val hasData = withTimeoutOrNull(3000) {
             dao.observeActivePlaylists().first { it.isNotEmpty() }
         } != null
         if (hasData) return
 
-        insertDefaultLists(defaultColors)
+        insertDefaultLists()
     }
 
-    private suspend fun insertDefaultLists(defaultColors: List<Int>) {
+    private suspend fun insertDefaultLists() {
         val standardLists = listOf(
             "List 1: Gospels"                       to listOf("Matthew", "Mark", "Luke", "John"),
             "List 2: Pentateuch"                    to listOf("Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy"),
@@ -109,8 +110,7 @@ class BibleRepository @Inject constructor(
             "List 10: Acts"                         to listOf("Acts")
         )
         standardLists.forEachIndexed { index, (name, books) ->
-            val color = defaultColors.random()
-            dao.createCustomList(ReadingListEntity(listName = name, listOrder = index, listColor = color), books)
+            dao.createCustomList(ReadingListEntity(listName = name, listOrder = index, listColor = 0), books)
         }
     }
 
@@ -251,11 +251,11 @@ class BibleRepository @Inject constructor(
         }
     }
 
-    suspend fun resetToDefaults(defaultColors: List<Int>) = withContext(Dispatchers.IO) {
+    suspend fun resetToDefaults() = withContext(Dispatchers.IO) {
         database.withTransaction {
             dao.clearAllBooks()
             dao.clearAllLists()
-            insertDefaultLists(defaultColors)
+            insertDefaultLists()
         }
         folderCache.evictAll()
     }

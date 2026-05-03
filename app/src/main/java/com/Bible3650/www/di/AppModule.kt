@@ -36,6 +36,7 @@ abstract class AppModule {
         fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "bible_database")
                 .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .fallbackToDestructiveMigration()
                 .build()
 
         @Provides

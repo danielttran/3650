@@ -406,6 +406,31 @@ fun ManageListsScreen(
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("List Color", style = MaterialTheme.typography.titleSmall)
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                                            .border(
+                                                width = if (selectedColor == 0) 3.dp else 1.dp,
+                                                color = if (selectedColor == 0)
+                                                    MaterialTheme.colorScheme.primary
+                                                else
+                                                    MaterialTheme.colorScheme.outlineVariant,
+                                                shape = CircleShape
+                                            )
+                                            .clickable { selectedColor = 0 },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "No Color",
+                                            modifier = Modifier.size(20.dp),
+                                            tint = if (selectedColor == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                                 items(ListColorPalette) { color ->
                                     val argb = color.toArgb()
                                     Box(
