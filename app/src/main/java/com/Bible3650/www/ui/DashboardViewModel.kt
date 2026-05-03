@@ -21,8 +21,7 @@ data class TaskUiModel(
     val dayOffset: Int,
     val title: String,
     val subtitle: String,
-    val fileUri: String,
-    val isCompleted: Boolean
+    val fileUri: String
 )
 
 sealed interface DashboardUiState {
@@ -32,10 +31,15 @@ sealed interface DashboardUiState {
 }
 
 sealed interface DashboardAction {
-    data class ToggleTask(val listId: Long, val isChecked: Boolean) : DashboardAction
+    data class CompleteTask(val listId: Long) : DashboardAction
+    data class UndoComplete(val listId: Long) : DashboardAction
     data class PlayFrom(val taskId: String) : DashboardAction
     object PlayPause : DashboardAction
     object SkipNext : DashboardAction
+}
+
+sealed interface DashboardUiEvent {
+    data class ShowSnackbar(val message: String, val actionLabel: String, val listId: Long) : DashboardUiEvent
 }
 
 @HiltViewModel
@@ -43,6 +47,9 @@ class DashboardViewModel @Inject constructor(
     private val repository: BibleRepository,
     private val audioManager: AudioControllerManager
 ) : ViewModel() {
+
+    private val _uiEvents = MutableSharedFlow<DashboardUiEvent>()
+    val uiEvents = _uiEvents.asSharedFlow()
 
     // currentMediaId is exposed separately so the UI can derive isPlaying per-item
     // without triggering a full re-map of all tasks on every track transition.
@@ -61,8 +68,7 @@ class DashboardViewModel @Inject constructor(
                 dayOffset   = task.dayOffset,
                 title       = task.listName,
                 subtitle    = "${task.targetBook} ${task.targetChapter}",
-                fileUri     = task.fileUri,
-                isCompleted = task.isCompleted
+                fileUri     = task.fileUri
             )
         }
         DashboardUiState.Active(mappedTasks)
@@ -72,7 +78,6 @@ class DashboardViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.initializeDatabaseIfNeeded()
-                repository.advanceDayIfNeeded()
                 withContext(Dispatchers.Main) {
                     tryRestorePlayback()
                 }
@@ -84,7 +89,7 @@ class DashboardViewModel @Inject constructor(
         viewModelScope.launch {
             audioManager.completedTracks.collect { listId ->
                 try {
-                    repository.dao.advanceListDay(listId)
+                    repository.advanceListDay(listId)
                 } catch (e: Exception) {
                     android.util.Log.e("DashboardVM", "Error advancing day", e)
                 }
@@ -122,8 +127,16 @@ class DashboardViewModel @Inject constructor(
     fun dispatchAction(action: DashboardAction) {
         android.util.Log.d("DashboardVM", "Dispatching action: $action")
         when (action) {
-            is DashboardAction.ToggleTask -> viewModelScope.launch {
-                repository.dao.updateTaskStatus(action.listId, action.isChecked)
+            is DashboardAction.CompleteTask -> viewModelScope.launch {
+                repository.advanceListDay(action.listId)
+                _uiEvents.emit(DashboardUiEvent.ShowSnackbar(
+                    message = "Task completed",
+                    actionLabel = "Undo",
+                    listId = action.listId
+                ))
+            }
+            is DashboardAction.UndoComplete -> viewModelScope.launch {
+                repository.revertListDay(action.listId)
             }
             is DashboardAction.PlayFrom -> {
                 if (uiState.value !is DashboardUiState.Active) return

@@ -14,7 +14,9 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -48,6 +50,25 @@ fun Bible3650App(dashboardViewModel: DashboardViewModel) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route ?: AppDestinations.HOME.route
 
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(Unit) {
+        dashboardViewModel.uiEvents.collect { event ->
+            when (event) {
+                is DashboardUiEvent.ShowSnackbar -> {
+                    val result = snackbarHostState.showSnackbar(
+                        message = event.message,
+                        actionLabel = event.actionLabel,
+                        duration = SnackbarDuration.Short
+                    )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        dashboardViewModel.dispatchAction(DashboardAction.UndoComplete(event.listId))
+                    }
+                }
+            }
+        }
+    }
+
     // Only show the bottom nav on top-level destinations
     val topLevelRoutes = AppDestinations.entries.map { it.route }
     val showBottomNav = topLevelRoutes.any { currentRoute.startsWith(it) }
@@ -75,6 +96,7 @@ fun Bible3650App(dashboardViewModel: DashboardViewModel) {
         ) {
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
+                snackbarHost = { SnackbarHost(snackbarHostState) },
                 topBar = {
                     if (currentRoute == AppDestinations.HOME.route) {
                         CenterAlignedTopAppBar(

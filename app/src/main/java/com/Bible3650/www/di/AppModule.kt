@@ -8,6 +8,7 @@ import com.Bible3650.www.data.local.AudioSourceDao
 import com.Bible3650.www.data.local.BibleDao
 import com.Bible3650.www.data.local.MIGRATION_2_3
 import com.Bible3650.www.data.local.MIGRATION_3_4
+import com.Bible3650.www.data.local.MIGRATION_4_5
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -23,7 +24,7 @@ object AppModule {
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "bible_database")
-            .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
 
     @Provides

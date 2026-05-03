@@ -10,7 +10,6 @@ data class DailyTask(
     val listName: String,
     val targetBook: String,
     val targetChapter: Int,
-    val isCompleted: Boolean,
     val fileUri: String = ""
 )
 
@@ -22,9 +21,11 @@ data class ReadingListEntity(
     @PrimaryKey(autoGenerate = true) val listId: Long = 0,
     @ColumnInfo(name = "list_name", collate = ColumnInfo.NOCASE) val listName: String,
     @ColumnInfo(name = "current_absolute_day") val currentDayIndex: Int = 1,
-    @ColumnInfo(name = "is_completed_today") val isCompletedToday: Boolean = false,
     @ColumnInfo(name = "created_at") val createdAtTimestamp: Long = System.currentTimeMillis(),
-    @ColumnInfo(name = "list_order") val listOrder: Int = 0
+    @ColumnInfo(name = "list_order") val listOrder: Int = 0,
+    // FROZEN STATE: Caches the current task so mid-day list edits don't jar the UI
+    @ColumnInfo(name = "active_book") val activeBook: String? = null,
+    @ColumnInfo(name = "active_chapter") val activeChapter: Int? = null
 )
 
 @Entity(
@@ -64,19 +65,12 @@ interface BibleDao {
     @Transaction
     @Query("SELECT * FROM reading_lists ORDER BY list_order ASC, created_at ASC")
     fun observeActivePlaylists(): Flow<List<ListWithBooks>>
-    
-    @Query("""
-        UPDATE reading_lists 
-        SET current_absolute_day = CASE WHEN is_completed_today = 1 THEN current_absolute_day + 1 ELSE current_absolute_day END,
-            is_completed_today = 0
-    """)
-    suspend fun atomicAdvanceDay()
 
-    @Query("UPDATE reading_lists SET current_absolute_day = current_absolute_day + 1, is_completed_today = 0 WHERE listId = :id")
-    suspend fun advanceListDay(id: Long)
+    @Query("SELECT * FROM reading_lists WHERE listId = :id")
+    suspend fun getListById(id: Long): ReadingListEntity?
 
-    @Query("UPDATE reading_lists SET is_completed_today = :status WHERE listId = :id")
-    suspend fun updateTaskStatus(id: Long, status: Boolean)
+    @Query("UPDATE reading_lists SET current_absolute_day = :newIndex, active_book = :newBook, active_chapter = :newChapter WHERE listId = :id")
+    suspend fun updateListProgress(id: Long, newIndex: Int, newBook: String?, newChapter: Int?)
 
     @Query("UPDATE reading_lists SET list_order = :order WHERE listId = :id")
     suspend fun updateListOrder(id: Long, order: Int)

@@ -17,7 +17,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withTimeoutOrNull
-import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,18 +27,6 @@ class BibleRepository @Inject constructor(
     private val contentResolver: ContentResolver,
     @ApplicationContext context: Context
 ) {
-    private val prefs: SharedPreferences =
-        context.getSharedPreferences("bible_repo_state", Context.MODE_PRIVATE)
-
-    suspend fun advanceDayIfNeeded() {
-        val today = LocalDate.now().toEpochDay()
-        val lastOpened = prefs.getLong("last_opened_day", -1L)
-        if (lastOpened < today) {
-            dao.atomicAdvanceDay()
-            prefs.edit().putLong("last_opened_day", today).apply()
-        }
-    }
-
     // Shared cache of folder→sorted-docIds so both dailyTasksFlow and
     // playTasks benefit from the same one-time directory scan.
     internal val folderCache = mutableMapOf<String, List<String>>()
@@ -100,34 +87,34 @@ class BibleRepository @Inject constructor(
     // Chapter resolution
     // ---------------------------------------------------------------------------
 
-    private fun resolveDailyTask(
+    private suspend fun resolveDailyTask(
         listData: ListWithBooks,
         dayOffset: Int,
         mappingsByBook: Map<String, BookMappingEntity>,
         activeSource: AudioSourceEntity?
     ): DailyTask {
-        val books = listData.books.sortedBy { it.sortOrder }
-        val totalChapters = books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
-        
-        if (books.isEmpty() || (totalChapters == 0)) {
-            return DailyTask(
-                listId        = listData.readingList.listId,
-                dayOffset     = dayOffset,
-                uniqueId      = "${listData.readingList.listId}_$dayOffset",
-                listName      = listData.readingList.listName,
-                targetBook    = "Empty",
-                targetChapter = 0,
-                isCompleted   = dayOffset == 0 && listData.readingList.isCompletedToday
-            )
-        }
+        val list = listData.readingList
+        val targetBook: String
+        val targetChapter: Int
 
-        var normalizedDay = ((listData.readingList.currentDayIndex + dayOffset - 1) % totalChapters) + 1
-        var targetBook    = ""
-        var targetChapter = 0
-        for (book in books) {
-            val count = BibleRegistry.getChapterCount(book.bookName)
-            if (normalizedDay <= count) { targetBook = book.bookName; targetChapter = normalizedDay; break }
-            normalizedDay -= count
+        if (dayOffset == 0) {
+            // FROZEN STATE: For the current task (offset 0), check if it's already frozen
+            if (list.activeBook != null && list.activeChapter != null) {
+                targetBook = list.activeBook
+                targetChapter = list.activeChapter
+            } else {
+                // Calculate and freeze
+                val result = calculateTargetTask(listData, 0)
+                targetBook = result.first
+                targetChapter = result.second
+                // Update DB with frozen state
+                dao.updateListProgress(list.listId, list.currentDayIndex, targetBook, targetChapter)
+            }
+        } else {
+            // Future tasks: always calculate dynamically based on current list config
+            val result = calculateTargetTask(listData, dayOffset)
+            targetBook = result.first
+            targetChapter = result.second
         }
 
         val mapping  = mappingsByBook[targetBook]
@@ -137,15 +124,42 @@ class BibleRepository @Inject constructor(
         } else ""
 
         return DailyTask(
-            listId        = listData.readingList.listId,
+            listId        = list.listId,
             dayOffset     = dayOffset,
-            uniqueId      = "${listData.readingList.listId}_$dayOffset",
-            listName      = listData.readingList.listName,
+            uniqueId      = "${list.listId}_$dayOffset",
+            listName      = list.listName,
             targetBook    = targetBook,
             targetChapter = targetChapter,
-            fileUri       = fileUri,
-            isCompleted   = dayOffset == 0 && listData.readingList.isCompletedToday
+            fileUri       = fileUri
         )
+    }
+
+    private fun calculateTargetTask(listData: ListWithBooks, dayOffset: Int): Pair<String, Int> {
+        val books = listData.books.sortedBy { it.sortOrder }
+        val totalChapters = books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
+
+        if (books.isEmpty() || totalChapters == 0) return "Empty" to 0
+
+        var normalizedDay = ((listData.readingList.currentDayIndex + dayOffset - 1) % totalChapters) + 1
+        for (book in books) {
+            val count = BibleRegistry.getChapterCount(book.bookName)
+            if (normalizedDay <= count) return book.bookName to normalizedDay
+            normalizedDay -= count
+        }
+        return "Empty" to 0
+    }
+
+    suspend fun advanceListDay(listId: Long) {
+        val list = dao.getListById(listId) ?: return
+        val newIndex = list.currentDayIndex + 1
+        // Setting book/chapter to null forces calculateAndFreezeNextTask (in resolveDailyTask) to run on next emission
+        dao.updateListProgress(listId, newIndex, null, null)
+    }
+
+    suspend fun revertListDay(listId: Long) {
+        val list = dao.getListById(listId) ?: return
+        val newIndex = maxOf(1, list.currentDayIndex - 1)
+        dao.updateListProgress(listId, newIndex, null, null)
     }
 
     // Returns the content URI for the Nth audio file (1-based) inside a SAF folder,

@@ -37,8 +37,7 @@ class ProfileViewModel @Inject constructor(
                     val totalChaptersInList = books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
                     
                     if (totalChaptersInList > 0) {
-                        val chaptersReadInList = listData.readingList.currentDayIndex - 1 +
-                            if (listData.readingList.isCompletedToday) 1 else 0
+                        val chaptersReadInList = listData.readingList.currentDayIndex - 1
                         totalChapters += chaptersReadInList
 
                         val fullLoops = chaptersReadInList / totalChaptersInList

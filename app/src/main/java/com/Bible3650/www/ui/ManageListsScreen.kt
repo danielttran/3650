@@ -26,6 +26,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -54,9 +55,7 @@ fun ManageListsScreen(
     var listNameInput by remember { mutableStateOf("") }
     var selectedBooks by remember { mutableStateOf<List<String>>(emptyList()) }
 
-    val allBooksInBible = BibleRegistry.getAllBooks()
-    val allBooksInLists = lists.flatMap { it.books }.map { it.bookName }.toSet()
-    val missingBooks = allBooksInBible.filter { !allBooksInLists.contains(it) }
+    val validationResults by viewModel.validationResults.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
 
@@ -198,25 +197,37 @@ fun ManageListsScreen(
                 Spacer(Modifier.height(8.dp))
             }
 
-            if (lists.isNotEmpty() && missingBooks.isNotEmpty()) {
-                item(key = "missing_books_warning") {
+            if (lists.isNotEmpty() && !validationResults.isValid) {
+                item(key = "validation_banner") {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer
+                            containerColor = Color(0xFFFFF9C4), // Soft Yellow
+                            contentColor = Color(0xFF5D4037)  // Darker text for readability
                         )
                     ) {
-                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Warning, contentDescription = "Warning",
-                                 tint = MaterialTheme.colorScheme.onErrorContainer)
-                            Spacer(Modifier.width(16.dp))
-                            Column {
-                                Text("Missing Books!", fontWeight = FontWeight.Bold,
-                                     color = MaterialTheme.colorScheme.onErrorContainer)
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Warning, contentDescription = "Warning", tint = Color(0xFFFBC02D))
+                                Spacer(Modifier.width(16.dp))
+                                Text("List Configuration Warning", fontWeight = FontWeight.Bold)
+                            }
+                            
+                            if (validationResults.missingBooks.isNotEmpty()) {
+                                Spacer(Modifier.height(8.dp))
+                                Text("Missing Books (${validationResults.missingBooks.size})", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
                                 Text(
-                                    "Missing ${missingBooks.size}: ${missingBooks.joinToString(", ")}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                    validationResults.missingBooks.joinToString(", "),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                            
+                            if (validationResults.duplicateBooks.isNotEmpty()) {
+                                Spacer(Modifier.height(8.dp))
+                                Text("Duplicate Books (${validationResults.duplicateBooks.size})", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    validationResults.duplicateBooks.joinToString(", "),
+                                    style = MaterialTheme.typography.bodySmall
                                 )
                             }
                         }
@@ -356,7 +367,7 @@ fun ManageListsScreen(
                         }
                         HorizontalDivider()
                         Text("Available Books (Tap to add):", fontWeight = FontWeight.Bold)
-                        val available = allBooksInBible.filter { it !in selectedBooks }
+                        val available = BibleRegistry.getAllBooks().filter { it !in selectedBooks }
                         LazyColumn(
                             modifier = Modifier.fillMaxWidth().weight(1f),
                             verticalArrangement = Arrangement.spacedBy(4.dp)

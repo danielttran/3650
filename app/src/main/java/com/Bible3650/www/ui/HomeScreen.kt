@@ -111,9 +111,9 @@ fun HomeScreen(
                                 onPlayClick = {
                                     viewModel.dispatchAction(DashboardAction.PlayFrom(task.id))
                                 },
-                                onToggle = { isChecked ->
+                                onComplete = {
                                     if (task.dayOffset == 0) {
-                                        viewModel.dispatchAction(DashboardAction.ToggleTask(task.listId, isChecked))
+                                        viewModel.dispatchAction(DashboardAction.CompleteTask(task.listId))
                                     }
                                 }
                             )
@@ -226,7 +226,7 @@ fun ListEntryItem(
     task: TaskUiModel,
     isPlaying: Boolean,
     onPlayClick: () -> Unit,
-    onToggle: (Boolean) -> Unit
+    onComplete: () -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -244,11 +244,11 @@ fun ListEntryItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (task.dayOffset == 0) {
-                IconButton(onClick = { onToggle(!task.isCompleted) }) {
+                IconButton(onClick = { onComplete() }) {
                     Icon(
-                        imageVector = if (task.isCompleted) Icons.Filled.CheckCircle else Icons.Outlined.Circle,
-                        contentDescription = "Toggle completion",
-                        tint = if (task.isCompleted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        imageVector = Icons.Outlined.Circle,
+                        contentDescription = "Mark as complete",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             } else {
