@@ -456,13 +456,16 @@ fun ManageListsScreen(
                             TextButton(
                                 onClick = {
                                     if (listNameInput.isNotBlank() && selectedBooks.isNotEmpty()) {
-                                        if (editingList?.listId == 0L) {
-                                            viewModel.createList(listNameInput, selectedBooks, selectedColor)
-                                        } else {
-                                            viewModel.updateList(
-                                                editingList!!.copy(listName = listNameInput, listColor = selectedColor),
-                                                selectedBooks
-                                            )
+                                        val el = editingList
+                                        if (el != null) {
+                                            if (el.listId == 0L) {
+                                                viewModel.createList(listNameInput, selectedBooks, selectedColor)
+                                            } else {
+                                                viewModel.updateList(
+                                                    el.copy(listName = listNameInput, listColor = selectedColor),
+                                                    selectedBooks
+                                                )
+                                            }
                                         }
                                         showListDialog = false
                                     }

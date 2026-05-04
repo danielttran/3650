@@ -37,7 +37,7 @@ private const val PREFS_NAME = "audio_playback_state"
 private const val KEY_MEDIA_ID = "last_media_id"
 private const val KEY_POSITION = "last_position_ms"
 
-// Suffix used to construct/parse task uniqueIds ("listId_dayOffset")
+// Separator in uniqueId format "listId_dayOffset_book_chapter"; listId is the first segment.
 private const val TASK_ID_SEPARATOR = "_"
 
 @Singleton

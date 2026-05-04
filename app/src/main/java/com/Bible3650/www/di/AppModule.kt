@@ -36,9 +36,10 @@ abstract class AppModule {
         @Singleton
         fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "bible_database")
-                // #16: MIGRATION_1_2 added so pre-release v1 users upgrade cleanly
+                // #16: MIGRATION_1_2 added so pre-release v1 users upgrade cleanly.
+                // All paths from v1→v8 are explicit — no fallback so a missing migration
+                // crashes loudly rather than silently wiping user reading progress.
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
-                .fallbackToDestructiveMigration()
                 .build()
 
         @Provides

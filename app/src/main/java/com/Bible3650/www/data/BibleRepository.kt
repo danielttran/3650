@@ -96,6 +96,8 @@ class BibleRepository @Inject constructor(
     fun clearCache() {
         folderCache.evictAll()
         cacheMutexes.clear()
+        resolvedUris.value = emptyMap()
+        resolvingTasks.clear()
     }
 
     val dailyTasksFlow: Flow<List<DailyTask>> = combine(
