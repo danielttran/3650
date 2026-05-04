@@ -63,14 +63,17 @@ fun ProfileScreen(
                 try {
                     val json = withContext(Dispatchers.IO) {
                         context.contentResolver.openInputStream(it)?.use { stream ->
-                            stream.bufferedReader().readText()
+                            val bytes = stream.readBytes()
+                            // Reject files over 10 MB to prevent OOM on corrupted/malicious backups
+                            if (bytes.size > 10 * 1024 * 1024) null
+                            else bytes.decodeToString()
                         }
                     }
                     if (json != null) {
                         pendingImportJson = json
                         showImportConfirm = true
                     } else {
-                        snackbarHostState.showSnackbar("Failed to read backup file")
+                        snackbarHostState.showSnackbar("Failed to read backup file (file may be too large or unreadable)")
                     }
                 } catch (e: Exception) {
                     snackbarHostState.showSnackbar("Failed to read backup file")

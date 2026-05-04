@@ -10,7 +10,7 @@ import androidx.media3.session.SessionToken
 import com.Bible3650.www.data.BibleRepository
 import com.Bible3650.www.data.local.DailyTask
 import com.google.common.util.concurrent.ListenableFuture
-import com.google.common.util.concurrent.MoreExecutors
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -123,6 +123,7 @@ class AudioControllerManager @Inject constructor(
                 controllerFuture = null
                 return@addListener
             }
+
             _player.value = mediaController
 
             mediaController.addListener(object : Player.Listener {
@@ -197,7 +198,7 @@ class AudioControllerManager @Inject constructor(
                     _playerError.tryEmit("Playback error: ${error.message ?: "unknown"}")
                 }
             })
-        }, MoreExecutors.directExecutor())
+        }, ContextCompat.getMainExecutor(context))
     }
 
     private var currentPlaylistRequestId: Long = 0
@@ -309,6 +310,11 @@ class AudioControllerManager @Inject constructor(
         positionUpdateJob?.cancel()
         positionUpdateJob = null
         _isPlaying.value = false
+        // Clear playback state so the UI doesn't show stale "Now Playing" after
+        // the service is destroyed and before a new controller connects.
+        _currentMediaId.value = null
+        _currentPosition.value = 0L
+        _duration.value = 0L
         _player.value?.release()
         _player.value = null
         controllerFuture?.let { MediaController.releaseFuture(it) }
