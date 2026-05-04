@@ -205,7 +205,6 @@ class BibleRepository @Inject constructor(
 
         return DailyTask(
             listId        = list.listId,
-            dayOffset     = dayOffset,
             // 1C: Include book+chapter so ExoPlayer's playlist match check correctly
             // detects when the user edits a list (e.g., swaps Genesis for Exodus).
             // Old format "listId_dayOffset" was stable across edits — ExoPlayer would

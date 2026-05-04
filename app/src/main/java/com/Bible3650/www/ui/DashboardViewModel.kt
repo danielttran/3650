@@ -18,7 +18,6 @@ import javax.inject.Inject
 data class TaskUiModel(
     val id: String,
     val listId: Long,
-    val dayOffset: Int,
     val title: String,
     val subtitle: String,
     val totalChapters: Int,
@@ -71,7 +70,6 @@ class DashboardViewModel @Inject constructor(
             TaskUiModel(
                 id            = task.uniqueId,
                 listId        = task.listId,
-                dayOffset     = task.dayOffset,
                 title         = task.listName,
                 subtitle      = "${task.targetBook} ${task.targetChapter}",
                 totalChapters = task.totalChapters,

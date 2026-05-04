@@ -7,7 +7,6 @@ import com.Bible3650.www.data.local.ReadingListEntity
 
 data class ProgressBackup(
     val version: Int = 1,
-    val timestamp: Long = System.currentTimeMillis(),
     val readingLists: List<ReadingListBackup> = emptyList(),
     val audioSources: List<AudioSourceBackup> = emptyList()
 )
