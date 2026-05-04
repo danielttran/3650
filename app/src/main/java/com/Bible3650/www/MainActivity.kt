@@ -5,8 +5,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
@@ -17,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -115,39 +119,50 @@ fun Bible3650App(dashboardViewModel: DashboardViewModel) {
                 modifier = Modifier.fillMaxSize(),
                 snackbarHost = { SnackbarHost(snackbarHostState) }
             ) { innerPadding ->
-                NavHost(
-                    navController = navController,
-                    startDestination = AppDestinations.HOME.route,
-                    modifier = Modifier.padding(innerPadding)
+                // Center content with a max width so it stays readable on tablets
+                // without stretching wall-to-wall on wide screens.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding),
+                    contentAlignment = Alignment.TopCenter
                 ) {
-                    composable(AppDestinations.HOME.route) {
-                        HomeScreen(viewModel = dashboardViewModel)
-                    }
-
-                    composable(AppDestinations.LISTS.route) {
-                        val listsViewModel: ManageListsViewModel = hiltViewModel()
-                        val sourceViewModel: SourceManagerViewModel = hiltViewModel()
-                        ManageListsScreen(
-                            viewModel        = listsViewModel,
-                            sourceViewModel  = sourceViewModel,
-                            onReviewMappings = { sourceId ->
-                                navController.navigate("review_mappings/$sourceId")
-                            }
-                        )
-                    }
-
-                    composable(
-                        route = "review_mappings/{sourceId}",
-                        arguments = listOf(navArgument("sourceId") { type = NavType.LongType })
+                    NavHost(
+                        navController = navController,
+                        startDestination = AppDestinations.HOME.route,
+                        modifier = Modifier
+                            .widthIn(max = 840.dp)
+                            .fillMaxHeight()
                     ) {
-                        ReviewMappingsScreen(
-                            onBack = { navController.navigateUp() }
-                        )
-                    }
+                        composable(AppDestinations.HOME.route) {
+                            HomeScreen(viewModel = dashboardViewModel)
+                        }
 
-                    composable(AppDestinations.PROFILE.route) {
-                        val profileViewModel: ProfileViewModel = hiltViewModel()
-                        ProfileScreen(viewModel = profileViewModel, modifier = Modifier.fillMaxSize())
+                        composable(AppDestinations.LISTS.route) {
+                            val listsViewModel: ManageListsViewModel = hiltViewModel()
+                            val sourceViewModel: SourceManagerViewModel = hiltViewModel()
+                            ManageListsScreen(
+                                viewModel        = listsViewModel,
+                                sourceViewModel  = sourceViewModel,
+                                onReviewMappings = { sourceId ->
+                                    navController.navigate("review_mappings/$sourceId")
+                                }
+                            )
+                        }
+
+                        composable(
+                            route = "review_mappings/{sourceId}",
+                            arguments = listOf(navArgument("sourceId") { type = NavType.LongType })
+                        ) {
+                            ReviewMappingsScreen(
+                                onBack = { navController.navigateUp() }
+                            )
+                        }
+
+                        composable(AppDestinations.PROFILE.route) {
+                            val profileViewModel: ProfileViewModel = hiltViewModel()
+                            ProfileScreen(viewModel = profileViewModel, modifier = Modifier.fillMaxSize())
+                        }
                     }
                 }
             }
