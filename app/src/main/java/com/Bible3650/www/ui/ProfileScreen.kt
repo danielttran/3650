@@ -8,6 +8,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.ui.res.stringResource
+import com.Bible3650.www.R
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,7 +85,11 @@ fun ProfileScreen(
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        modifier = Modifier.fillMaxSize(),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(title = { Text(stringResource(R.string.title_my_progress)) })
+        }
     ) { padding ->
         Column(
             modifier = modifier
@@ -175,7 +181,7 @@ fun ProfileScreen(
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
                     Card(
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = cardColor, contentColor = contentColor)
                     ) {
                         Column(

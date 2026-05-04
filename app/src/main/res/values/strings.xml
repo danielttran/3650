@@ -1,6 +1,8 @@
 <resources>
     <string name="app_name">Bible3650</string>
-    <string name="header_prof_grant_horner">PROFESSOR GRANT HORNER BIBLE</string>
+    <string name="header_prof_grant_horner">Professor Grant Horner Bible</string>
     <string name="msg_no_audio_source">No audio source linked</string>
     <string name="title_review_mappings">Review Mappings</string>
+    <string name="title_reading_lists">Reading Lists</string>
+    <string name="title_my_progress">My Progress</string>
 </resources>

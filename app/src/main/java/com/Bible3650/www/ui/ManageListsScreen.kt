@@ -42,6 +42,7 @@ import com.Bible3650.www.domain.PresetPlan
 import com.Bible3650.www.domain.toKey
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.runtime.saveable.rememberSaveable
+import com.Bible3650.www.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -114,8 +115,11 @@ fun ManageListsScreen(
     }
 
     Scaffold(
-        modifier = modifier,
+        modifier = modifier.fillMaxSize(),
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(title = { Text(stringResource(R.string.title_reading_lists)) })
+        },
         floatingActionButtonPosition = FabPosition.Start,
         floatingActionButton = {
             FloatingActionButton(onClick = {
@@ -151,7 +155,7 @@ fun ManageListsScreen(
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .clip(RoundedCornerShape(12.dp))
                                     .clickable { 
                                         selectedPresetKey = plan.toKey()
                                         showResetPickerDialog = false
@@ -610,13 +614,13 @@ fun ManageListsScreen(
                         }
                         LazyColumn(
                             modifier = Modifier.fillMaxWidth().weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             items(available, key = { "available_$it" }) { book ->
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(RoundedCornerShape(12.dp))
                                         .clickable {
                                             if (book !in selectedBooks) {
                                                 selectedBooks = selectedBooks + book

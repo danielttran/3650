@@ -59,52 +59,57 @@ fun HomeScreen(
                     uiState.tasks.find { it.id == currentMediaId }
                 }
 
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 8.dp)
-                ) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 12.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                stringResource(R.string.header_prof_grant_horner),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-
-                    items(uiState.tasks, key = { "task_${it.id}" }) { task ->
-                        ListEntryItem(
-                            task = task,
-                            isPlaying = task.id == currentMediaId,
-                            onPlayClick = {
-                                viewModel.dispatchAction(DashboardAction.PlayFrom(task.id))
-                            },
-                            onDecrement = {
-                                viewModel.dispatchAction(DashboardAction.DecrementProgress(task.listId))
-                            },
-                            onIncrement = {
-                                viewModel.dispatchAction(DashboardAction.IncrementProgress(task.listId))
-                            }
+                Column(Modifier.fillMaxSize()) {
+                    // Pinned screen header — stays visible while the list scrolls
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            stringResource(R.string.header_prof_grant_horner),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
 
-                    item { Spacer(modifier = Modifier.height(140.dp)) }
+                    // Scrollable task list + floating mini-player
+                    Box(Modifier.weight(1f)) {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(bottom = 8.dp)
+                        ) {
+                            items(uiState.tasks, key = { "task_${it.id}" }) { task ->
+                                ListEntryItem(
+                                    task = task,
+                                    isPlaying = task.id == currentMediaId,
+                                    onPlayClick = {
+                                        viewModel.dispatchAction(DashboardAction.PlayFrom(task.id))
+                                    },
+                                    onDecrement = {
+                                        viewModel.dispatchAction(DashboardAction.DecrementProgress(task.listId))
+                                    },
+                                    onIncrement = {
+                                        viewModel.dispatchAction(DashboardAction.IncrementProgress(task.listId))
+                                    }
+                                )
+                            }
+                            item { Spacer(modifier = Modifier.height(140.dp)) }
+                        }
+
+                        // MiniPlayerBar is its own composable so that currentPosition /
+                        // duration updates only recompose the bar, not the entire list.
+                        MiniPlayerBar(
+                            playingTask = playingTask,
+                            viewModel = viewModel,
+                            modifier = Modifier.align(Alignment.BottomCenter)
+                        )
+                    }
                 }
-
-                // MiniPlayerBar is its own composable so that currentPosition / duration
-                // updates only recompose the bar, not the entire screen.
-                MiniPlayerBar(
-                    playingTask = playingTask,
-                    viewModel = viewModel,
-                    modifier = Modifier.align(Alignment.BottomCenter)
-                )
             }
         }
     }
