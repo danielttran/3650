@@ -34,6 +34,13 @@ android {
             )
         }
     }
+
+    testOptions {
+        unitTests.all {
+            it.systemProperty("org.sqlite.tmpdir", project.file("../sqlite_tmp").absolutePath)
+        }
+    }
+
     buildFeatures {
         buildConfig = true
         compose = true
