@@ -320,7 +320,8 @@ fun ManageListsScreen(
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Warning, contentDescription = "Warning", tint = Color(0xFFFBC02D))
+                                Icon(Icons.Default.Warning, contentDescription = "Warning",
+                                     tint = MaterialTheme.colorScheme.onErrorContainer)
                                 Spacer(Modifier.width(16.dp))
                                 Text("List Configuration Warning", style = MaterialTheme.typography.titleSmall)
                             }
@@ -600,6 +601,13 @@ fun ManageListsScreen(
                         HorizontalDivider()
                         Text("Available Books (Tap to add)", style = MaterialTheme.typography.titleSmall)
                         val available = BibleRegistry.getAllBooks().filter { it !in selectedBooks }
+                        if (available.isEmpty()) {
+                            Text(
+                                "All books have been added to this list.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         LazyColumn(
                             modifier = Modifier.fillMaxWidth().weight(1f),
                             verticalArrangement = Arrangement.spacedBy(4.dp)

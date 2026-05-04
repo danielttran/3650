@@ -116,11 +116,16 @@ class BibleRepository @Inject constructor(
         val missing = tasks.filter { !uris.containsKey(it.uniqueId) && resolvingTasks.add(it.uniqueId) }
         if (missing.isNotEmpty()) {
             repositoryScope.launch {
-                val newUris = missing.associate { task ->
-                    task.uniqueId to getTaskFileUri(task.targetBook, task.targetChapter)
+                try {
+                    val newUris = missing.associate { task ->
+                        task.uniqueId to getTaskFileUri(task.targetBook, task.targetChapter)
+                    }
+                    resolvedUris.update { it + newUris }
+                } finally {
+                    // Always remove from in-flight set so a failure doesn't permanently
+                    // block re-resolution for these tasks on the next emission.
+                    missing.forEach { resolvingTasks.remove(it.uniqueId) }
                 }
-                resolvedUris.update { it + newUris }
-                missing.forEach { resolvingTasks.remove(it.uniqueId) }
             }
         }
 
@@ -313,10 +318,9 @@ class BibleRepository @Inject constructor(
                 }
             }
 
-            folderCache.evictAll()
-            // Clear stale URI cache so old source paths don't bleed into the restored data
-            resolvedUris.value = emptyMap()
-            resolvingTasks.clear()
+            // Clear all caches (including cacheMutexes) so stale URI paths don't
+            // bleed into the newly restored data.
+            clearCache()
             true
         } catch (e: Exception) {
             android.util.Log.e("BibleRepo", "Database restoration failed", e)
@@ -353,7 +357,10 @@ class BibleRepository @Inject constructor(
         cache: android.util.LruCache<String, List<String>>? = null
     ): Uri? {
         val cacheKey = "${treeUri}::${folderDocId}"
-        val mutex = cacheMutexes.getOrPut(cacheKey) { Mutex() }
+        // computeIfAbsent is atomic — getOrPut on ConcurrentHashMap is NOT, so two
+        // concurrent callers could create separate Mutex objects for the same key,
+        // defeating the purpose of the lock.
+        val mutex = cacheMutexes.computeIfAbsent(cacheKey) { Mutex() }
 
         val sortedDocIds = mutex.withLock {
             val cachedFiles = cache?.get(cacheKey)
