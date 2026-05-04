@@ -74,7 +74,10 @@ android {
 
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
+    // Try to disable incremental room to see if it helps
+    arg("room.incremental", "false")
 }
+
 
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
