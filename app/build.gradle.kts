@@ -17,8 +17,8 @@ android {
         applicationId = "com.Bible3650.www"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -28,6 +28,7 @@ android {
             // #17: Enable R8 minification in release so debug Log.d/Log.v calls are
             // stripped via the rule in proguard-rules.pro. This also shrinks the APK.
             isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
