@@ -62,9 +62,22 @@ class ManageListsViewModel @Inject constructor(
     }
 
     fun createList(name: String, books: List<String>, colorArgb: Int) {
+        val trimmedName = name.trim()
+        if (trimmedName.isBlank()) {
+            viewModelScope.launch { _uiEvents.emit("List name cannot be empty.") }
+            return
+        }
+        if (trimmedName.length > 50) {
+            viewModelScope.launch { _uiEvents.emit("List name is too long (max 50 characters).") }
+            return
+        }
+        if (books.isEmpty()) {
+            viewModelScope.launch { _uiEvents.emit("A list must contain at least one book.") }
+            return
+        }
         viewModelScope.launch {
             try {
-                repository.createList(name, books, colorArgb)
+                repository.createList(trimmedName, books, colorArgb)
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error creating list", e)
                 _uiEvents.emit("Failed to create list.")

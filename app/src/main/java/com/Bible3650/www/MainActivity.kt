@@ -54,6 +54,9 @@ fun Bible3650App(dashboardViewModel: DashboardViewModel) {
     ) { }
 
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Request notification permission separately so the event collector below
+    // is not blocked waiting for the permission dialog.
     LaunchedEffect(Unit) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             if (androidx.core.content.ContextCompat.checkSelfPermission(
@@ -64,7 +67,9 @@ fun Bible3650App(dashboardViewModel: DashboardViewModel) {
                 requestPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
             }
         }
-        
+    }
+
+    LaunchedEffect(dashboardViewModel) {
         dashboardViewModel.uiEvents.collect { event ->
             when (event) {
                 is DashboardUiEvent.ShowSnackbar -> {

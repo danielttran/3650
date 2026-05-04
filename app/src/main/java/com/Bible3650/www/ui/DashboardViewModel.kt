@@ -184,7 +184,9 @@ class DashboardViewModel @Inject constructor(
             is DashboardAction.PlayFrom -> {
                 if (uiState.value !is DashboardUiState.Active) return
                 viewModelScope.launch {
-                    val tasks = repository.dailyTasksFlow.first()
+                    val tasks = withTimeoutOrNull(3_000) {
+                        repository.dailyTasksFlow.first()
+                    } ?: return@launch
                     val startIndex = tasks.indexOfFirst { it.uniqueId == action.taskId }
                     if (startIndex == -1) return@launch
                     audioManager.playTasks(tasks, startIndex)

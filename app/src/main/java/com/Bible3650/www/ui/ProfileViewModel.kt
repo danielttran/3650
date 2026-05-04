@@ -36,13 +36,14 @@ class ProfileViewModel @Inject constructor(
                 val bookCounts = mutableMapOf<String, Int>()
                 val bookToListColor = mutableMapOf<String, Int>()
 
-                lists.forEach { listData ->
+                // Sort by listOrder so books that appear in multiple lists consistently
+                // take the color of the lowest-ordered list (first list wins).
+                lists.sortedBy { it.readingList.listOrder }.forEach { listData ->
                     val books = listData.books.sortedBy { it.sortOrder }
                     val totalChaptersInList = books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
 
-                    // Map every book in this list to its list color
                     val listColor = listData.readingList.listColor
-                    books.forEach { bookToListColor[it.bookName] = listColor }
+                    books.forEach { bookToListColor.putIfAbsent(it.bookName, listColor) }
 
                     if (totalChaptersInList > 0) {
                         val chaptersReadInList = maxOf(0, (listData.readingList.currentDayIndex - 1) - listData.readingList.statResetOffset)

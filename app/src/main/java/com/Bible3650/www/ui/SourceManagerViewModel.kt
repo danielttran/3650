@@ -11,9 +11,12 @@ import com.Bible3650.www.data.local.BookMappingEntity
 import com.Bible3650.www.data.local.SourceWithMappings
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -87,6 +90,9 @@ class SourceManagerViewModel @Inject constructor(
         _detectionState.value = DetectionState.Idle
     }
 
+    private val _uiEvents = MutableSharedFlow<String>()
+    val uiEvents: SharedFlow<String> = _uiEvents.asSharedFlow()
+
     fun switchSource(source: AudioSourceEntity) {
         viewModelScope.launch {
             try {
@@ -94,6 +100,7 @@ class SourceManagerViewModel @Inject constructor(
                 repository.clearCache()
             } catch (e: Exception) {
                 android.util.Log.e("SourceManager", "Error switching source", e)
+                _uiEvents.emit("Failed to switch audio source.")
             }
         }
     }
@@ -105,6 +112,7 @@ class SourceManagerViewModel @Inject constructor(
                 repository.clearCache()
             } catch (e: Exception) {
                 android.util.Log.e("SourceManager", "Error deleting source", e)
+                _uiEvents.emit("Failed to delete audio source.")
             }
         }
     }
