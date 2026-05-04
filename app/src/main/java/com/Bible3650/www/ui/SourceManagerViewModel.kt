@@ -109,13 +109,4 @@ class SourceManagerViewModel @Inject constructor(
         }
     }
 
-    fun renameSource(source: AudioSourceEntity, newName: String) {
-        viewModelScope.launch {
-            try {
-                dao.updateSource(source.copy(displayName = newName))
-            } catch (e: Exception) {
-                android.util.Log.e("SourceManager", "Error renaming source", e)
-            }
-        }
-    }
 }

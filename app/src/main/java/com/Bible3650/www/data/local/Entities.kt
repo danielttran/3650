@@ -5,7 +5,6 @@ import kotlinx.coroutines.flow.Flow
 
 data class DailyTask(
     val listId: Long,
-    val dayOffset: Int,
     val uniqueId: String,
     val listName: String,
     val targetBook: String,
@@ -90,9 +89,6 @@ interface BibleDao {
 
     @Query("UPDATE reading_lists SET manual_offset = :newOffset, active_book = NULL, active_chapter = NULL WHERE listId = :id")
     suspend fun updateManualOffset(id: Long, newOffset: Int)
-
-    @Query("UPDATE reading_lists SET list_color = :color WHERE listId = :id")
-    suspend fun updateListColor(id: Long, color: Int)
 
     @Query("UPDATE reading_lists SET list_order = :order WHERE listId = :id")
     suspend fun updateListOrder(id: Long, order: Int)

@@ -105,8 +105,6 @@ class ReviewMappingsViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ReviewUiState())
 
-    // Called after the user manually picks a folder for a specific book.
-    // The picked treeUri is both the permission root and the folder itself.
     fun onManualBookFolderPicked(bookName: String, treeUri: Uri, fileCount: Int) {
         val docId = try {
             DocumentsContract.getTreeDocumentId(treeUri)
@@ -129,9 +127,6 @@ class ReviewMappingsViewModel @Inject constructor(
         }
     }
 
-    fun clearMapping(bookName: String) {
-        viewModelScope.launch { dao.deleteMapping(sourceId, bookName) }
-    }
 }
 
 // ---------------------------------------------------------------------------
