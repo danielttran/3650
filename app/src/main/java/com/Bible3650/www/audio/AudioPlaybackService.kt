@@ -92,10 +92,15 @@ class AudioPlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         audioControllerManager.release()
-        mediaLibrarySession?.run {
-            player.stop()
+        if (mediaLibrarySession != null) {
+            mediaLibrarySession?.run {
+                player.stop()
+                player.release()
+                release()
+            }
+        } else if (::player.isInitialized) {
+            // Session was never assigned (onCreate threw after player creation) — release directly.
             player.release()
-            release()
         }
         mediaLibrarySession = null
         super.onDestroy()

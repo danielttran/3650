@@ -24,6 +24,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 import androidx.room.withTransaction
@@ -54,8 +55,10 @@ class BibleRepository @Inject constructor(
     // Lifecycle-bound scope for background URI resolution — never leaks like ad-hoc scopes
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // #7: Guard so freezeActiveTasks() only runs once per process lifetime.
-    @Volatile private var frozenOnce = false
+    // #7: AtomicBoolean + compareAndSet prevents two coroutines racing past the check
+    // simultaneously (a @Volatile var is visible across threads but doesn't give
+    // compare-and-set atomicity, so TOCTOU is possible under concurrent callers).
+    private val frozenOnce = AtomicBoolean(false)
 
     /** Emits true when at least one audio source mapping is active. */
     val hasActiveSourceFlow: Flow<Boolean> =
@@ -68,8 +71,7 @@ class BibleRepository @Inject constructor(
     // #7: idempotency guard — freezeActiveTasks is called on every cold start and must
     // not issue N database writes if the user re-opens the app rapidly.
     suspend fun freezeActiveTasks() {
-        if (frozenOnce) return
-        frozenOnce = true
+        if (!frozenOnce.compareAndSet(false, true)) return
 
         val lists = dao.getAllLists()
         val updates = mutableListOf<suspend () -> Unit>()
@@ -278,26 +280,35 @@ class BibleRepository @Inject constructor(
             return@withContext false
         }
 
+        // Gson doesn't honor Kotlin non-null: a missing JSON key produces null even for
+        // non-nullable List fields. Guard every field before accessing it.
+        val readingLists = backup.readingLists ?: emptyList()
+        val audioSources = backup.audioSources ?: emptyList()
+
         try {
             database.withTransaction {
                 dao.clearAllBooks()
                 dao.clearAllLists()
 
-                backup.readingLists.forEach { rb ->
+                readingLists.forEach { rb ->
+                    if (rb?.entity == null) return@forEach
                     val list = rb.entity.copy(listId = 0)
                     val newId = dao.insertList(list)
-                    dao.insertBooks(rb.books.map { it.copy(id = 0, listId = newId) })
+                    val books = rb.books ?: emptyList()
+                    dao.insertBooks(books.map { it.copy(id = 0, listId = newId) })
                 }
 
                 // #3: Only replace audio sources if the backup actually includes them.
                 // An old/stripped backup with no sources must NOT wipe existing mappings.
-                if (backup.audioSources.isNotEmpty()) {
+                if (audioSources.isNotEmpty()) {
                     audioSourceDao.clearAllMappings()
                     audioSourceDao.clearAllSources()
-                    backup.audioSources.forEach { sb ->
+                    audioSources.forEach { sb ->
+                        if (sb?.entity == null) return@forEach
                         val source = sb.entity.copy(sourceId = 0)
                         val newId = audioSourceDao.insertSource(source)
-                        audioSourceDao.upsertMappings(sb.mappings.map { it.copy(sourceId = newId) })
+                        val mappings = sb.mappings ?: emptyList()
+                        audioSourceDao.upsertMappings(mappings.map { it.copy(sourceId = newId) })
                     }
                 }
             }
@@ -330,7 +341,7 @@ class BibleRepository @Inject constructor(
         resolvingTasks.clear()
         folderCache.evictAll()
         // Allow freezeActiveTasks to re-freeze the new lists on next launch
-        frozenOnce = false
+        frozenOnce.set(false)
     }
 
     // Returns the content URI for the Nth audio file (1-based) inside a SAF folder,

@@ -107,6 +107,12 @@ fun ManageListsScreen(
         }
     }
 
+    LaunchedEffect(sourceViewModel) {
+        sourceViewModel.uiEvents.collect { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
     Scaffold(
         modifier = modifier,
         snackbarHost = { SnackbarHost(snackbarHostState) },
