@@ -266,11 +266,17 @@ class AudioControllerManager @Inject constructor(
                         .build()
                 }
 
-                // #13: Warn if the start item has no resolvable URI
+                // #13: Warn if the start item has no resolvable URI, and also report
+                // when other items in the playlist are missing — those would otherwise
+                // fail silently mid-playback when ExoPlayer auto-transitions to them.
+                val missingCount = allMediaItems.count { it.localConfiguration?.uri == null }
                 val startUri = allMediaItems.getOrNull(startIndex)?.localConfiguration?.uri
                 if (startUri == null) {
                     android.util.Log.w("AudioController", "No audio URI for task at index $startIndex")
                     _playerError.tryEmit("Audio file not found. Check your audio source mapping.")
+                } else if (missingCount > 0) {
+                    android.util.Log.w("AudioController", "$missingCount task(s) missing audio URIs — those tracks will be skipped")
+                    _playerError.tryEmit("$missingCount reading(s) have no audio file mapped.")
                 }
 
                 withContext(mainDispatcher) {
@@ -315,8 +321,10 @@ class AudioControllerManager @Inject constructor(
         _currentMediaId.value = null
         _currentPosition.value = 0L
         _duration.value = 0L
-        _player.value?.release()
         _player.value = null
+        // Use releaseFuture only; it handles the case where the future is still
+        // pending (cancels) and where it has resolved (releases the controller).
+        // Do NOT also call mediaController.release() — that double-disposes.
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null
         // scope.cancel() intentionally removed — @Singleton scope lives forever

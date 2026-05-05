@@ -70,20 +70,14 @@ android {
             useLegacyPackaging = true
         }
     }
-
-    // #19: Tell Room's KSP processor where to write the exported schema JSON files.
-    // Commit the schemas/ directory to version control as a migration history record.
-    sourceSets {
-        getByName("main") {
-            assets.srcDirs("schemas")
-        }
-    }
 }
 
 ksp {
+    // Room's KSP processor writes the exported schema JSON files here. The
+    // schemas/ directory is committed to version control as migration history;
+    // it is NOT added to the main source set so the JSON files are not packaged
+    // into the APK as assets.
     arg("room.schemaLocation", "$projectDir/schemas")
-    // Try to disable incremental room to see if it helps
-    arg("room.incremental", "false")
 }
 
 
