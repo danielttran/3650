@@ -5,9 +5,14 @@
    Note: This file is ignored for devices older than API 31
    See https://developer.android.com/about/versions/12/backup-restore
 -->
-<full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
+<!--
+    The app stores SAF persistable URIs and a Room database, neither of which
+    survives a restore to a different device (URIs become invalid, and the
+    audio source is per-device). Manual backup/restore is exposed via the
+    app's JSON export/import flow, so auto-backup is disabled at the
+    application level. This file is left as a no-op for older devices.
 -->
+<full-backup-content>
+    <exclude domain="database" path="bible_database" />
+    <exclude domain="sharedpref" path="audio_playback_state.xml" />
 </full-backup-content>

@@ -124,7 +124,10 @@ private fun MiniPlayerBar(
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
     val duration by viewModel.duration.collectAsStateWithLifecycle()
 
-    if (playingTask == null && !isPlaying) return
+    // Hide the bar entirely when there is nothing to show. Showing a placeholder
+    // ("Audio Player (0)") while isPlaying is true but the playing task hasn't
+    // resolved leads to a confusing flash, so require a real task.
+    if (playingTask == null) return
 
     Surface(
         modifier = modifier.fillMaxWidth(),
