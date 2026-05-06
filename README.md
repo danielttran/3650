@@ -27,10 +27,12 @@ By reading one chapter from each of the 10 lists daily, you will read 10 chapter
 This app is built natively for Android using:
 * **Jetpack Compose:** For a modern, reactive UI.
 * **Room Database:** For persistent state and reading progression tracking.
-* **ExoPlayer / Media3:** A background service orchestrates audio playback via IPC, automatically advancing the daily database task when a chapter completes.
+* **Media3:** A background `MediaLibraryService` orchestrates audio playback via IPC, automatically advancing the daily database task when a chapter completes.
 * **Hilt:** For Dependency Injection.
-* **Play Asset Delivery:** The 4.6GB of audio is packaged via 5 asset pack modules (`bible_assets_1` through `5`) to circumvent the 4GB Zip32 limit of standard APKs.
+* **Storage Access Framework (SAF):** Audio files are loaded at runtime from a folder the user selects on their device. This approach removes the need to bundle the large (~4.6 GB) audio collection inside the app.
 
 ## Development & Deployment
-Due to the immense size of the audio assets (~4.6GB), standard ADB deployment takes approximately 5 minutes and may time out. 
-To test rapidly, the `app/build.gradle.kts` uses a lightweight `bible_assets_test` module containing only the first 3 chapters of each book. For production releases, comment out the test pack and uncomment the full asset packs.
+
+Because audio is provided by the user via SAF, there are no large asset packs to manage and standard ADB installation is fast.
+
+The app includes robust concurrency handling for audio playback, proper error recovery, tablet support, and a clean Material 3 UI.
