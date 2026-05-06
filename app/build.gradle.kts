@@ -23,12 +23,23 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        // TODO: Configure a proper release keystore before publishing to Google Play
+        // release {
+        //     storeFile = file("your-release-key.jks")
+        //     storePassword = "..."
+        //     keyAlias = "..."
+        //     keyPassword = "..."
+        // }
+    }
+
     buildTypes {
         release {
             // #17: Enable R8 minification in release so debug Log.d/Log.v calls are
             // stripped via the rule in proguard-rules.pro. This also shrinks the APK.
             isMinifyEnabled = true
-            signingConfig = signingConfigs.getByName("debug")
+
+            // signingConfig = signingConfigs.getByName("release")   // Enable after configuring release keystore above
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
