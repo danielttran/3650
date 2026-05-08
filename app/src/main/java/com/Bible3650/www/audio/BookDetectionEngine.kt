@@ -196,16 +196,23 @@ class BookDetectionEngine @Inject constructor(
     }
 
     private fun levenshtein(s1: String, s2: String): Int {
+        if (s1.isEmpty()) return s2.length
+        if (s2.isEmpty()) return s1.length
+
         val dp = IntArray(s2.length + 1) { it }
         for (i in 1..s1.length) {
-            var prev = i
+            var previousDiagonal = dp[0]
+            dp[0] = i
+
             for (j in 1..s2.length) {
-                val current = if (s1[i - 1] == s2[j - 1]) dp[j - 1]
-                else minOf(dp[j - 1], dp[j], prev) + 1
-                dp[j - 1] = prev
-                prev = current
+                val previousColumn = dp[j]
+                dp[j] = if (s1[i - 1] == s2[j - 1]) {
+                    previousDiagonal
+                } else {
+                    minOf(previousDiagonal, previousColumn, dp[j - 1]) + 1
+                }
+                previousDiagonal = previousColumn
             }
-            dp[s2.length] = prev
         }
         return dp[s2.length]
     }
