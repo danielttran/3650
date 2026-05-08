@@ -203,6 +203,15 @@ class AudioControllerManager @Inject constructor(
 
     private var currentPlaylistRequestId: Long = 0
 
+    private fun computeSafeStartIndex(taskCount: Int, requestedStartIndex: Int): Int {
+        return when {
+            taskCount <= 0 -> androidx.media3.common.C.INDEX_UNSET
+            requestedStartIndex < 0 -> 0
+            requestedStartIndex >= taskCount -> taskCount - 1
+            else -> requestedStartIndex
+        }
+    }
+
     // #5: Resolve ALL URIs before touching the player so there is no seek race from
     // the old two-phase build. Latency is acceptable for ≤10 items.
     fun playTasks(
@@ -212,6 +221,7 @@ class AudioControllerManager @Inject constructor(
         playWhenReady: Boolean = true
     ) {
         android.util.Log.d("AudioController", "playTasks: tasks=${tasks.size}, startIndex=$startIndex")
+        val safeStartIndex = computeSafeStartIndex(tasks.size, startIndex)
         val player = _player.value ?: run {
             // Attempt to reconnect if a previous release cleared the controller
             if (controllerFuture == null) initializeController()
@@ -231,7 +241,9 @@ class AudioControllerManager @Inject constructor(
             if (isMatch) {
                 // Playlist matches — just seek to the required index and play/pause
                 val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs else 0L
-                player.seekTo(startIndex, startPos)
+                if (safeStartIndex != androidx.media3.common.C.INDEX_UNSET) {
+                    player.seekTo(safeStartIndex, startPos)
+                }
                 if (playWhenReady) player.play() else player.pause()
                 return
             }
@@ -270,7 +282,7 @@ class AudioControllerManager @Inject constructor(
                 // when other items in the playlist are missing — those would otherwise
                 // fail silently mid-playback when ExoPlayer auto-transitions to them.
                 val missingCount = allMediaItems.count { it.localConfiguration?.uri == null }
-                val startUri = allMediaItems.getOrNull(startIndex)?.localConfiguration?.uri
+                val startUri = allMediaItems.getOrNull(safeStartIndex)?.localConfiguration?.uri
                 if (startUri == null) {
                     android.util.Log.w("AudioController", "No audio URI for task at index $startIndex")
                     _playerError.tryEmit("Audio file not found. Check your audio source mapping.")
@@ -284,7 +296,7 @@ class AudioControllerManager @Inject constructor(
 
                     val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs
                                    else androidx.media3.common.C.TIME_UNSET
-                    player.setMediaItems(allMediaItems, startIndex, startPos)
+                    player.setMediaItems(allMediaItems, safeStartIndex, startPos)
                     player.prepare()
                     if (playWhenReady) player.play() else player.pause()
                 }
