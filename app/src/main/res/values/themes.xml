@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.Bible3650" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.Bible3650" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- DayNight window background prevents a white flash before Compose draws in dark mode -->
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>

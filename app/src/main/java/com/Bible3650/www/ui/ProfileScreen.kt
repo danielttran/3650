@@ -172,14 +172,9 @@ fun ProfileScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(uiState.bookStats, key = { it.bookName }) { stat ->
-                    val cardColor = when {
-                        stat.listColor != 0 -> Color(stat.listColor)
-                        else -> MaterialTheme.colorScheme.surfaceVariant
-                    }
-                    val contentColor = when {
-                        stat.listColor != 0 -> Color(0xFF1E1E1E) // Dark gray/black text
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    }
+                    val hasColor = stat.listColor != 0
+                    val cardColor = if (hasColor) Color(stat.listColor) else MaterialTheme.colorScheme.surfaceVariant
+                    val contentColor = if (hasColor) contentColorOn(cardColor) else MaterialTheme.colorScheme.onSurfaceVariant
                     Card(
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = cardColor, contentColor = contentColor)
@@ -201,9 +196,9 @@ fun ProfileScreen(
                                 text = "(${stat.readCount})",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (stat.readCount > 0)
-                                    if (stat.listColor != 0) Color.Black else MaterialTheme.colorScheme.primary
+                                    if (hasColor) contentColor else MaterialTheme.colorScheme.primary
                                 else
-                                    if (stat.listColor != 0) Color(0xFF1E1E1E).copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant
+                                    if (hasColor) contentColor.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }

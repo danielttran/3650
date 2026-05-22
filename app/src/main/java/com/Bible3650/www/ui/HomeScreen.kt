@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -239,7 +240,8 @@ fun ListEntryItem(
     onIncrement: () -> Unit
 ) {
     val listColor = if (task.listColor != 0) Color(task.listColor) else null
-    
+    val surface = MaterialTheme.colorScheme.surface
+
     val backgroundColor = when {
         isPlaying && listColor != null -> listColor.copy(alpha = 0.85f)
         isPlaying -> MaterialTheme.colorScheme.primaryContainer
@@ -247,21 +249,24 @@ fun ListEntryItem(
         else -> MaterialTheme.colorScheme.surface
     }
 
-    val titleColor = when {
-        isPlaying && listColor != null -> Color.Black
-        isPlaying -> MaterialTheme.colorScheme.primary
-        listColor != null -> Color.Black
-        else -> MaterialTheme.colorScheme.onSurface
-    }
-
-    val subtitleColor = when {
-        listColor != null -> Color.Black.copy(alpha = 0.7f)
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    val iconColor = when {
-        listColor != null -> Color.Black.copy(alpha = 0.7f)
-        else -> MaterialTheme.colorScheme.primary
+    val titleColor: Color
+    val subtitleColor: Color
+    val iconColor: Color
+    if (listColor != null) {
+        // Composite the translucent list color over the real surface so the chosen
+        // on-color stays readable in both light and dark themes.
+        val effectiveBg = backgroundColor.compositeOver(surface)
+        titleColor = contentColorOn(effectiveBg)
+        subtitleColor = titleColor.copy(alpha = 0.7f)
+        iconColor = titleColor.copy(alpha = 0.85f)
+    } else if (isPlaying) {
+        titleColor = MaterialTheme.colorScheme.onPrimaryContainer
+        subtitleColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+        iconColor = MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        titleColor = MaterialTheme.colorScheme.onSurface
+        subtitleColor = MaterialTheme.colorScheme.onSurfaceVariant
+        iconColor = MaterialTheme.colorScheme.primary
     }
 
     Surface(
