@@ -92,6 +92,9 @@ interface AudioSourceDao {
     @Query("DELETE FROM book_mappings WHERE sourceId = :sourceId AND bookName = :bookName")
     suspend fun deleteMapping(sourceId: Long, bookName: String)
 
+    @Query("DELETE FROM book_mappings WHERE sourceId = :sourceId")
+    suspend fun clearMappingsForSource(sourceId: Long)
+
     @Query("DELETE FROM book_mappings")
     suspend fun clearAllMappings()
 

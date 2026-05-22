@@ -210,7 +210,7 @@ fun ProfileScreen(
         AlertDialog(
             onDismissRequest = { showImportConfirm = false },
             title = { Text("Restore Progress?") },
-            text = { Text("This will overwrite your current Listening Lists and all statistics. This action cannot be undone.") },
+            text = { Text("This will overwrite your current Listening Lists and all statistics. This action cannot be undone.\n\nNote: audio folder access does not transfer between devices, so after restoring on a new device you may need to re-link your audio source under Lists → Audio Sources.") },
             confirmButton = {
                 TextButton(
                     onClick = {

@@ -55,6 +55,7 @@ fun ManageListsScreen(
     val lists by viewModel.listsFlow.collectAsStateWithLifecycle()
     val sources by sourceViewModel.sources.collectAsStateWithLifecycle()
     val detectionState by sourceViewModel.detectionState.collectAsStateWithLifecycle()
+    val unavailableSourceIds by sourceViewModel.unavailableSourceIds.collectAsStateWithLifecycle()
 
     var showListDialog by remember { mutableStateOf(false) }
     var editingList by remember { mutableStateOf<com.Bible3650.www.data.local.ReadingListEntity?>(null) }
@@ -62,9 +63,20 @@ fun ManageListsScreen(
     var selectedBooks by remember { mutableStateOf<List<String>>(emptyList()) }
     var selectedColor by remember { mutableStateOf(0) }
     var pendingDeleteList by remember { mutableStateOf<com.Bible3650.www.data.local.ReadingListEntity?>(null) }
+    var pendingRelinkSourceId by remember { mutableStateOf<Long?>(null) }
 
     val validationResults by viewModel.validationResults.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    // #12: Check whether the saved audio folders are still accessible whenever the screen opens.
+    LaunchedEffect(Unit) { sourceViewModel.refreshSourceHealth() }
+
+    fun suggestedNameFor(uri: android.net.Uri): String =
+        uri.lastPathSegment
+            ?.substringAfterLast('/')
+            ?.substringAfterLast(':')
+            ?.ifBlank { "Audio Bible" }
+            ?: "Audio Bible"
 
     val folderPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -79,12 +91,24 @@ fun ManageListsScreen(
             } catch (e: SecurityException) {
                 android.util.Log.e("ManageLists", "Provider does not support persistable URIs", e)
             }
-            val suggested = uri.lastPathSegment
-                ?.substringAfterLast('/')
-                ?.substringAfterLast(':')
-                ?.ifBlank { "Audio Bible" }
-                ?: "Audio Bible"
-            sourceViewModel.onRootFolderPicked(uri, suggested)
+            sourceViewModel.onRootFolderPicked(uri, suggestedNameFor(uri))
+        }
+    }
+
+    val relinkLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        val sourceId = pendingRelinkSourceId
+        pendingRelinkSourceId = null
+        if (uri != null && sourceId != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: SecurityException) {
+                android.util.Log.e("ManageLists", "Provider does not support persistable URIs", e)
+            }
+            sourceViewModel.relinkSource(sourceId, uri, suggestedNameFor(uri))
         }
     }
 
@@ -269,8 +293,13 @@ fun ManageListsScreen(
             items(sources, key = { "source_${it.source.sourceId}" }) { swm ->
                 SourceCard(
                     swm          = swm,
+                    isUnavailable = swm.source.sourceId in unavailableSourceIds,
                     onMakeActive = { sourceViewModel.switchSource(swm.source) },
                     onReview     = { onReviewMappings(swm.source.sourceId) },
+                    onRelink     = {
+                        pendingRelinkSourceId = swm.source.sourceId
+                        relinkLauncher.launch(null)
+                    },
                     onDelete     = { sourceViewModel.deleteSource(swm.source) }
                 )
             }
@@ -647,8 +676,10 @@ fun ManageListsScreen(
 @Composable
 private fun SourceCard(
     swm: com.Bible3650.www.data.local.SourceWithMappings,
+    isUnavailable: Boolean,
     onMakeActive: () -> Unit,
     onReview: () -> Unit,
+    onRelink: () -> Unit,
     onDelete: () -> Unit
 ) {
     val mapped = swm.mappings.size
@@ -659,18 +690,19 @@ private fun SourceCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (swm.source.isActive)
-                MaterialTheme.colorScheme.primaryContainer
-            else
-                MaterialTheme.colorScheme.surfaceVariant
+            containerColor = when {
+                isUnavailable      -> MaterialTheme.colorScheme.errorContainer
+                swm.source.isActive -> MaterialTheme.colorScheme.primaryContainer
+                else               -> MaterialTheme.colorScheme.surfaceVariant
+            }
         )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = if (allMapped) Icons.Filled.CheckCircle else Icons.Default.Warning,
+                    imageVector = if (allMapped && !isUnavailable) Icons.Filled.CheckCircle else Icons.Default.Warning,
                     contentDescription = null,
-                    tint = if (allMapped) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    tint = if (allMapped && !isUnavailable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(Modifier.width(8.dp))
@@ -686,14 +718,30 @@ private fun SourceCard(
                     Badge { Text("Active") }
                 }
             }
+
+            if (isUnavailable) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "This folder is no longer accessible — it may have been moved, deleted, or its permission revoked. Re-link it to restore playback.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onReview, modifier = Modifier.weight(1f)) {
-                    Text("Review")
-                }
-                if (!swm.source.isActive) {
-                    Button(onClick = onMakeActive, modifier = Modifier.weight(1f)) {
-                        Text("Use")
+                if (isUnavailable) {
+                    Button(onClick = onRelink, modifier = Modifier.weight(1f)) {
+                        Text("Re-link")
+                    }
+                } else {
+                    OutlinedButton(onClick = onReview, modifier = Modifier.weight(1f)) {
+                        Text("Review")
+                    }
+                    if (!swm.source.isActive) {
+                        Button(onClick = onMakeActive, modifier = Modifier.weight(1f)) {
+                            Text("Use")
+                        }
                     }
                 }
                 IconButton(onClick = onDelete) {
