@@ -61,6 +61,7 @@ fun NowPlayingScreen(
     val position by viewModel.currentPosition.collectAsStateWithLifecycle()
     val speed by viewModel.playbackSpeed.collectAsStateWithLifecycle()
     val sleepTimer by viewModel.sleepTimer.collectAsStateWithLifecycle()
+    val isSynthesizing by viewModel.isSynthesizing.collectAsStateWithLifecycle()
 
     val playingTask = remember(tasks, currentMediaId) { tasks.find { it.id == currentMediaId } }
 
@@ -99,6 +100,15 @@ fun NowPlayingScreen(
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2
                 )
+
+                if (isSynthesizing) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.synthesizing),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
 
                 Spacer(Modifier.height(24.dp))
 

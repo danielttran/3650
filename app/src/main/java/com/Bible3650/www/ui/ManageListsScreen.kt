@@ -66,6 +66,9 @@ fun ManageListsScreen(
     val detectionState by sourceViewModel.detectionState.collectAsStateWithLifecycle()
     val unavailableSourceIds by sourceViewModel.unavailableSourceIds.collectAsStateWithLifecycle()
     val apocryphaSuggestion by sourceViewModel.apocryphaSuggestion.collectAsStateWithLifecycle()
+    val catalog by sourceViewModel.catalog.collectAsStateWithLifecycle()
+    val textOpState by sourceViewModel.textOpState.collectAsStateWithLifecycle()
+    var showTextBibleDialog by remember { mutableStateOf(false) }
 
     var showListDialog by remember { mutableStateOf(false) }
     var editingList by remember { mutableStateOf<com.Bible3650.www.data.local.ReadingListEntity?>(null) }
@@ -129,6 +132,20 @@ fun ManageListsScreen(
         }
     }
 
+    val importTextLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (e: SecurityException) {
+                android.util.Log.w("ManageLists", "No persistable permission for imported text", e)
+            }
+            sourceViewModel.importText(uri, suggestedNameFor(uri))
+            showTextBibleDialog = false
+        }
+    }
+
     val snackbarHostState = remember { SnackbarHostState() }
     // Step 1: show preset picker; step 2: confirm selected plan
     var showResetPickerDialog  by rememberSaveable { mutableStateOf(false) }
@@ -170,6 +187,63 @@ fun ManageListsScreen(
                 TextButton(onClick = { sourceViewModel.dismissApocryphaSuggestion() }) {
                     Text(stringResource(R.string.action_not_now))
                 }
+            }
+        )
+    }
+
+    if (showTextBibleDialog) {
+        val op = textOpState
+        AlertDialog(
+            onDismissRequest = {
+                if (op !is TextOpState.Running && op !is TextOpState.Progress) {
+                    showTextBibleDialog = false
+                    sourceViewModel.resetTextOpState()
+                }
+            },
+            title = { Text(stringResource(R.string.add_text_bible)) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.text_bible_dialog_desc), style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(12.dp))
+                    when (op) {
+                        is TextOpState.Running -> Text(stringResource(R.string.text_op_preparing), style = MaterialTheme.typography.bodySmall)
+                        is TextOpState.Progress -> Text(
+                            stringResource(R.string.text_op_progress, op.done, op.total),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        is TextOpState.Error -> Text(op.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        TextOpState.Idle -> {
+                            catalog.forEach { entry ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(entry.name, style = MaterialTheme.typography.titleSmall)
+                                        entry.attribution?.let {
+                                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                    TextButton(onClick = { sourceViewModel.downloadTranslation(entry) }) {
+                                        Text(stringResource(R.string.action_download))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { importTextLauncher.launch(arrayOf("application/json", "text/*", "application/xml", "*/*")) },
+                    enabled = op !is TextOpState.Running && op !is TextOpState.Progress
+                ) { Text(stringResource(R.string.action_import_file)) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showTextBibleDialog = false
+                    sourceViewModel.resetTextOpState()
+                }) { Text(stringResource(R.string.action_close)) }
             }
         )
     }
@@ -359,6 +433,19 @@ fun ManageListsScreen(
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.reset_lists), color = MaterialTheme.colorScheme.error)
                     }
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        sourceViewModel.loadCatalog()
+                        showTextBibleDialog = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = detectionState !is DetectionState.Running
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.add_text_bible))
                 }
                 Spacer(Modifier.height(8.dp))
             }
@@ -777,9 +864,11 @@ private fun SourceCard(
     onRelink: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val isText = swm.source.sourceType == "TEXT"
     val mapped = swm.mappings.size
     val total  = BibleRegistry.getAllBooks().size
     val allMapped = mapped == total
+    val ok = if (isText) !isUnavailable else (allMapped && !isUnavailable)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -795,19 +884,24 @@ private fun SourceCard(
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = if (allMapped && !isUnavailable) Icons.Filled.CheckCircle else Icons.Default.Warning,
+                    imageVector = if (ok) Icons.Filled.CheckCircle else Icons.Default.Warning,
                     contentDescription = null,
-                    tint = if (allMapped && !isUnavailable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    tint = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(swm.source.displayName, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        stringResource(R.string.books_linked, mapped, total),
+                        if (isText) stringResource(R.string.text_source_subtitle)
+                        else stringResource(R.string.books_linked, mapped, total),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                if (isText) {
+                    Badge { Text(stringResource(R.string.badge_text)) }
+                    Spacer(Modifier.width(4.dp))
                 }
                 if (swm.source.isActive) {
                     Badge { Text(stringResource(R.string.active)) }
@@ -830,8 +924,10 @@ private fun SourceCard(
                         Text(stringResource(R.string.action_relink))
                     }
                 } else {
-                    OutlinedButton(onClick = onReview, modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.action_review))
+                    if (!isText) {
+                        OutlinedButton(onClick = onReview, modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.action_review))
+                        }
                     }
                     if (!swm.source.isActive) {
                         Button(onClick = onMakeActive, modifier = Modifier.weight(1f)) {

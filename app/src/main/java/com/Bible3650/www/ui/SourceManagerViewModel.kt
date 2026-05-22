@@ -13,8 +13,14 @@ import com.Bible3650.www.data.BibleRegistry
 import com.Bible3650.www.data.BibleRepository
 import com.Bible3650.www.data.local.AudioSourceDao
 import com.Bible3650.www.data.local.AudioSourceEntity
+import com.Bible3650.www.data.local.BibleTextDao
+import com.Bible3650.www.data.local.BibleTextEntity
+import com.Bible3650.www.data.local.BibleTranslationEntity
 import com.Bible3650.www.data.local.BookMappingEntity
 import com.Bible3650.www.data.local.SourceWithMappings
+import com.Bible3650.www.data.text.BibleTextDownloader
+import com.Bible3650.www.data.text.BibleTextImporter
+import com.Bible3650.www.data.text.CatalogEntry
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -35,12 +41,22 @@ sealed interface DetectionState {
     data class Error(val message: String) : DetectionState
 }
 
+/** Progress of a text-Bible download or import. */
+sealed interface TextOpState {
+    object Idle : TextOpState
+    object Running : TextOpState
+    data class Progress(val done: Int, val total: Int) : TextOpState
+    data class Error(val message: String) : TextOpState
+}
+
 @HiltViewModel
 class SourceManagerViewModel @Inject constructor(
     private val dao: AudioSourceDao,
     private val engine: BookDetectionEngine,
     private val repository: BibleRepository,
     private val audioManager: AudioControllerManager,
+    private val downloader: BibleTextDownloader,
+    private val textDao: BibleTextDao,
     private val contentResolver: ContentResolver
 ) : ViewModel() {
 
@@ -59,6 +75,13 @@ class SourceManagerViewModel @Inject constructor(
     // Apocrypha list?" prompt. Cleared on dismiss or after the list is created.
     private val _apocryphaSuggestion = MutableStateFlow<List<String>>(emptyList())
     val apocryphaSuggestion: StateFlow<List<String>> = _apocryphaSuggestion
+
+    // Text-Bible (TTS) catalog + download/import progress.
+    private val _catalog = MutableStateFlow<List<CatalogEntry>>(emptyList())
+    val catalog: StateFlow<List<CatalogEntry>> = _catalog
+
+    private val _textOpState = MutableStateFlow<TextOpState>(TextOpState.Idle)
+    val textOpState: StateFlow<TextOpState> = _textOpState
 
     /** Re-checks whether each source's root folder is still accessible. */
     fun refreshSourceHealth() {
@@ -230,6 +253,86 @@ class SourceManagerViewModel @Inject constructor(
         _apocryphaSuggestion.value = emptyList()
     }
 
+    // ---------------------------------------------------------------------------
+    // Text Bibles (TTS)
+    // ---------------------------------------------------------------------------
+
+    fun loadCatalog() {
+        viewModelScope.launch {
+            _catalog.value = runCatching { withContext(Dispatchers.IO) { downloader.loadCatalog() } }
+                .getOrDefault(emptyList())
+        }
+    }
+
+    fun resetTextOpState() {
+        _textOpState.value = TextOpState.Idle
+    }
+
+    /** Downloads a catalog translation into the text store and adds it as a TEXT source. */
+    fun downloadTranslation(entry: CatalogEntry) {
+        viewModelScope.launch {
+            _textOpState.value = TextOpState.Running
+            try {
+                val translationId = downloader.download(entry) { done, total ->
+                    _textOpState.value = TextOpState.Progress(done, total)
+                }
+                createTextSource(translationId, entry.name)
+                _textOpState.value = TextOpState.Idle
+            } catch (e: Exception) {
+                android.util.Log.e("SourceManager", "Text download failed", e)
+                _textOpState.value = TextOpState.Error(e.localizedMessage ?: "Download failed")
+            }
+        }
+    }
+
+    /** Imports a user-supplied text file (any supported format) as a TEXT source. */
+    fun importText(uri: Uri, displayName: String) {
+        viewModelScope.launch {
+            _textOpState.value = TextOpState.Running
+            try {
+                val translationId = withContext(Dispatchers.IO) {
+                    val content = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        ?: throw IllegalStateException("Could not read file")
+                    val chapters = BibleTextImporter.parse(content)
+                    if (chapters.isEmpty()) throw IllegalStateException("No scripture found in file")
+                    val hasApoc = chapters.any { BibleRegistry.isApocryphal(it.book) }
+                    val tid = textDao.insertTranslation(
+                        BibleTranslationEntity(
+                            name = displayName,
+                            abbrev = displayName.take(8),
+                            origin = "IMPORT",
+                            hasApocrypha = hasApoc,
+                            license = "Imported by user"
+                        )
+                    )
+                    chapters.chunked(200).forEach { batch ->
+                        textDao.upsertChapters(batch.map { BibleTextEntity(tid, it.book, it.chapter, it.text) })
+                    }
+                    tid
+                }
+                createTextSource(translationId, displayName)
+                _textOpState.value = TextOpState.Idle
+            } catch (e: Exception) {
+                android.util.Log.e("SourceManager", "Text import failed", e)
+                _textOpState.value = TextOpState.Error(e.localizedMessage ?: "Import failed")
+            }
+        }
+    }
+
+    private suspend fun createTextSource(translationId: Long, name: String) {
+        val active = dao.getActiveSource()
+        dao.insertSource(
+            AudioSourceEntity(
+                displayName = name,
+                rootTreeUri = "text://$translationId",
+                isActive = active == null,
+                sourceType = "TEXT",
+                translationId = translationId
+            )
+        )
+        repository.clearCache()
+    }
+
     private val _uiEvents = MutableSharedFlow<String>()
     val uiEvents: SharedFlow<String> = _uiEvents.asSharedFlow()
 
@@ -256,6 +359,12 @@ class SourceManagerViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 dao.deleteSource(source)
+                // For a text source, also remove the stored translation (cascades its text).
+                if (source.sourceType == "TEXT") {
+                    source.translationId?.let { tid ->
+                        textDao.getTranslation(tid)?.let { textDao.deleteTranslation(it) }
+                    }
+                }
                 repository.clearCache()
                 refreshSourceHealth()
             } catch (e: Exception) {
