@@ -11,7 +11,11 @@ data class AudioSourceEntity(
     @ColumnInfo(name = "display_name") val displayName: String,
     @ColumnInfo(name = "root_tree_uri") val rootTreeUri: String,
     @ColumnInfo(name = "is_active") val isActive: Boolean = false,
-    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
+    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
+    // "AUDIO" = folder of recordings (the original model); "TEXT" = TTS over a stored
+    // translation referenced by [translationId].
+    @ColumnInfo(name = "source_type") val sourceType: String = "AUDIO",
+    @ColumnInfo(name = "translation_id") val translationId: Long? = null
 )
 
 // Each row maps one Bible book to its folder within a source.
