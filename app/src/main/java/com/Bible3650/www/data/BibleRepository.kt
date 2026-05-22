@@ -14,7 +14,9 @@ import com.Bible3650.www.data.local.ReadingListEntity
 import com.Bible3650.www.domain.DefaultsProvider
 import com.Bible3650.www.domain.PresetPlan
 import com.Bible3650.www.domain.ReadingPlanUseCase
-import com.google.gson.Gson
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,6 +36,15 @@ private const val MAX_FOLDER_CACHE_ENTRIES = 100
 
 // Current backup schema version. Checked on import to guard against stale backups.
 private const val BACKUP_VERSION_CURRENT = 1
+
+// Tolerant JSON config: ignore unknown keys (forward-compat) and coerce nulls on
+// non-null-with-default fields so partial/older backups still import cleanly.
+private val BackupJson = Json {
+    ignoreUnknownKeys = true
+    isLenient = true
+    coerceInputValues = true
+    encodeDefaults = true
+}
 
 @Singleton
 class BibleRepository @Inject constructor(
@@ -304,14 +315,14 @@ class BibleRepository @Inject constructor(
         val lists = dao.getAllLists().map { ReadingListBackup(it.readingList, it.books) }
         val sources = audioSourceDao.getAllSources().map { AudioSourceBackup(it.source, it.mappings) }
         val backup = ProgressBackup(readingLists = lists, audioSources = sources)
-        Gson().toJson(backup)
+        BackupJson.encodeToString(backup)
     }
 
     // #3: Guard prevents wiping audio sources when the backup contains none.
     // #14: Reject backups with an unsupported schema version to avoid silent corruption.
     suspend fun importProgress(json: String): Boolean = withContext(Dispatchers.IO) {
         val backup = try {
-            Gson().fromJson(json, ProgressBackup::class.java)
+            BackupJson.decodeFromString<ProgressBackup>(json)
         } catch (e: Exception) {
             android.util.Log.e("BibleRepo", "Import JSON parse failed", e)
             null
@@ -323,8 +334,7 @@ class BibleRepository @Inject constructor(
             return@withContext false
         }
 
-        // Gson doesn't honor Kotlin non-null: a missing JSON key produces null even for
-        // non-nullable List fields. Guard every field before accessing it.
+        // Nullable list fields are guarded below so partial backups still import cleanly.
         val readingLists = backup.readingLists ?: emptyList()
         val audioSources = backup.audioSources ?: emptyList()
 

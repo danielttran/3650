@@ -2,7 +2,9 @@ package com.Bible3650.www.data.local
 
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
 
+@Serializable
 @Entity(tableName = "audio_sources")
 data class AudioSourceEntity(
     @PrimaryKey(autoGenerate = true) val sourceId: Long = 0,
@@ -15,6 +17,7 @@ data class AudioSourceEntity(
 // Each row maps one Bible book to its folder within a source.
 // overrideTreeUri is non-null only when the user manually picked a different folder
 // (which may live outside the source's original root tree).
+@Serializable
 @Entity(
     tableName = "book_mappings",
     primaryKeys = ["sourceId", "bookName"],

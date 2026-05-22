@@ -2,6 +2,7 @@ package com.Bible3650.www.data.local
 
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
 
 data class DailyTask(
     val listId: Long,
@@ -19,6 +20,7 @@ data class DailyTask(
     val listColor: Int = 0
 )
 
+@Serializable
 @Entity(
     tableName = "reading_lists",
     indices = [Index(value = ["list_name"], unique = true)]
@@ -38,6 +40,7 @@ data class ReadingListEntity(
     @ColumnInfo(name = "list_color") val listColor: Int = 0
 )
 
+@Serializable
 @Entity(
     tableName = "list_books",
     foreignKeys = [
