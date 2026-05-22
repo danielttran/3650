@@ -7,6 +7,7 @@ import androidx.core.net.toUri
 import com.Bible3650.www.data.local.AudioSourceDao
 import com.Bible3650.www.data.local.AudioSourceEntity
 import com.Bible3650.www.data.local.BibleDao
+import com.Bible3650.www.data.local.BibleTextDao
 import com.Bible3650.www.data.local.BookMappingEntity
 import com.Bible3650.www.data.local.DailyTask
 import com.Bible3650.www.data.local.ListWithBooks
@@ -14,7 +15,9 @@ import com.Bible3650.www.data.local.ReadingListEntity
 import com.Bible3650.www.domain.DefaultsProvider
 import com.Bible3650.www.domain.PresetPlan
 import com.Bible3650.www.domain.ReadingPlanUseCase
-import com.google.gson.Gson
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,6 +38,15 @@ private const val MAX_FOLDER_CACHE_ENTRIES = 100
 // Current backup schema version. Checked on import to guard against stale backups.
 private const val BACKUP_VERSION_CURRENT = 1
 
+// Tolerant JSON config: ignore unknown keys (forward-compat) and coerce nulls on
+// non-null-with-default fields so partial/older backups still import cleanly.
+private val BackupJson = Json {
+    ignoreUnknownKeys = true
+    isLenient = true
+    coerceInputValues = true
+    encodeDefaults = true
+}
+
 @Singleton
 class BibleRepository @Inject constructor(
     private val database: AppDatabase,
@@ -43,6 +55,7 @@ class BibleRepository @Inject constructor(
     // go through repository methods which also handle cache invalidation.
     internal val dao: BibleDao,
     internal val audioSourceDao: AudioSourceDao,
+    internal val bibleTextDao: BibleTextDao,
     private val contentResolver: ContentResolver
 ) {
     // Shared cache of folder→sorted-docIds so both dailyTasksFlow and
@@ -208,7 +221,19 @@ class BibleRepository @Inject constructor(
         // fileUri is resolved asynchronously later by the ViewModel to prevent IPC blocking
         val fileUri = ""
 
-        val totalChapters = listData.books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
+        val sortedBooks = listData.books.sortedBy { it.sortOrder }
+        val totalChapters = sortedBooks.sumOf { BibleRegistry.getChapterCount(it.bookName) }
+
+        // Cumulative position (1..totalChapters) of the current chapter within the cycle.
+        var loopPosition = 0
+        for (b in sortedBooks) {
+            val count = BibleRegistry.getChapterCount(b.bookName)
+            if (b.bookName == targetBook) {
+                loopPosition += targetChapter.coerceIn(0, count)
+                break
+            }
+            loopPosition += count
+        }
 
         return DailyTask(
             listId        = list.listId,
@@ -221,13 +246,55 @@ class BibleRepository @Inject constructor(
             targetBook    = targetBook,
             targetChapter = targetChapter,
             totalChapters = totalChapters,
+            loopPosition  = loopPosition,
+            books         = sortedBooks.map { it.bookName },
             fileUri       = fileUri,
             listColor     = list.listColor
         )
     }
 
+    /**
+     * Repositions a list's cursor to [targetBook] [targetChapter] without changing the
+     * lifetime progress counter, so manual jumps don't inflate or erase read statistics.
+     * Implemented as an adjustment to the manual offset (which also clears the frozen task).
+     */
+    suspend fun jumpToChapter(listId: Long, targetBook: String, targetChapter: Int) {
+        val listData = dao.getListWithBooksById(listId) ?: return
+        val sortedBooks = listData.books.sortedBy { it.sortOrder }
+        val total = sortedBooks.sumOf { BibleRegistry.getChapterCount(it.bookName) }
+        if (total == 0) return
+
+        var position = 0
+        var matched = false
+        for (b in sortedBooks) {
+            val count = BibleRegistry.getChapterCount(b.bookName)
+            if (b.bookName == targetBook) {
+                position += targetChapter.coerceIn(1, count)
+                matched = true
+                break
+            }
+            position += count
+        }
+        if (!matched || position <= 0) return
+
+        // Choose an offset so the computed position lands on `position` while leaving
+        // currentDayIndex (and therefore stats) untouched.
+        val newOffset = position - listData.readingList.currentDayIndex
+        dao.updateManualOffset(listId, newOffset)
+    }
+
     suspend fun getTaskFileUri(targetBook: String, targetChapter: Int): String {
         val activeSource = audioSourceDao.getActiveSource() ?: return ""
+
+        // For TEXT (TTS) sources, report availability cheaply WITHOUT synthesizing — the
+        // actual audio is rendered lazily at play time. This sentinel is never played; it
+        // only signals to the UI/resync that this chapter has text.
+        if (activeSource.sourceType == "TEXT") {
+            val tid = activeSource.translationId ?: return ""
+            return if (bibleTextDao.getChapter(tid, targetBook, targetChapter) != null)
+                "tts://$tid/$targetBook/$targetChapter" else ""
+        }
+
         val mapping = audioSourceDao.getMappingForBook(activeSource.sourceId, targetBook) ?: return ""
 
         return try {
@@ -246,12 +313,6 @@ class BibleRepository @Inject constructor(
         dao.updateListProgress(listId, newIndex, null, null)
     }
 
-    suspend fun revertListDay(listId: Long) {
-        val list = dao.getListById(listId) ?: return
-        val newIndex = maxOf(1, list.currentDayIndex - 1)
-        dao.updateListProgress(listId, newIndex, null, null)
-    }
-
     suspend fun incrementManualOffset(listId: Long) {
         val list = dao.getListById(listId) ?: return
         dao.updateManualOffset(listId, list.manualOffset + 1)
@@ -266,14 +327,14 @@ class BibleRepository @Inject constructor(
         val lists = dao.getAllLists().map { ReadingListBackup(it.readingList, it.books) }
         val sources = audioSourceDao.getAllSources().map { AudioSourceBackup(it.source, it.mappings) }
         val backup = ProgressBackup(readingLists = lists, audioSources = sources)
-        Gson().toJson(backup)
+        BackupJson.encodeToString(backup)
     }
 
     // #3: Guard prevents wiping audio sources when the backup contains none.
     // #14: Reject backups with an unsupported schema version to avoid silent corruption.
     suspend fun importProgress(json: String): Boolean = withContext(Dispatchers.IO) {
         val backup = try {
-            Gson().fromJson(json, ProgressBackup::class.java)
+            BackupJson.decodeFromString<ProgressBackup>(json)
         } catch (e: Exception) {
             android.util.Log.e("BibleRepo", "Import JSON parse failed", e)
             null
@@ -285,8 +346,7 @@ class BibleRepository @Inject constructor(
             return@withContext false
         }
 
-        // Gson doesn't honor Kotlin non-null: a missing JSON key produces null even for
-        // non-nullable List fields. Guard every field before accessing it.
+        // Nullable list fields are guarded below so partial backups still import cleanly.
         val readingLists = backup.readingLists ?: emptyList()
         val audioSources = backup.audioSources ?: emptyList()
 
@@ -410,10 +470,8 @@ class BibleRepository @Inject constructor(
                     cache?.put(cacheKey, empty)
                     empty
                 } else {
-                    val sorted = files
-                        .map { it.second to tokenize(it.first) }
-                        .sortedWith { a, b -> compareTokens(a.second, b.second) }
-                        .map { it.first }
+                    // Natural numeric ordering so "Chapter 10" follows "Chapter 9".
+                    val sorted = NaturalFileSort.sortedDocIds(files)
                     // LruCache automatically evicts oldest entries when exceeding max size
                     cache?.put(cacheKey, sorted)
                     sorted
@@ -438,35 +496,4 @@ class BibleRepository @Inject constructor(
         endsWith(".m4a",  ignoreCase = true) ||
         endsWith(".ogg",  ignoreCase = true) ||
         endsWith(".flac", ignoreCase = true)
-
-    private fun compareTokens(aToks: List<Pair<Boolean, String>>, bToks: List<Pair<Boolean, String>>): Int {
-        for (i in 0 until minOf(aToks.size, bToks.size)) {
-            val (aNum, aStr) = aToks[i]; val (bNum, bStr) = bToks[i]
-            val cmp = if (aNum && bNum) {
-                val aLong = aStr.toLongOrNull() ?: Long.MAX_VALUE
-                val bLong = bStr.toLongOrNull() ?: Long.MAX_VALUE
-                aLong.compareTo(bLong)
-            } else {
-                aStr.compareTo(bStr, ignoreCase = true)
-            }
-            if (cmp != 0) return cmp
-        }
-        return aToks.size.compareTo(bToks.size)
-    }
-
-    private fun tokenize(s: String): List<Pair<Boolean, String>> {
-        val result = mutableListOf<Pair<Boolean, String>>()
-        var i = 0
-        while (i < s.length) {
-            val start = i
-            if (s[i].isDigit()) {
-                while (i < s.length && s[i].isDigit()) i++
-                result.add(true to s.substring(start, i))
-            } else {
-                while (i < s.length && !s[i].isDigit()) i++
-                result.add(false to s.substring(start, i))
-            }
-        }
-        return result
-    }
 }

@@ -2,19 +2,26 @@ package com.Bible3650.www.data.local
 
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
 
+@Serializable
 @Entity(tableName = "audio_sources")
 data class AudioSourceEntity(
     @PrimaryKey(autoGenerate = true) val sourceId: Long = 0,
     @ColumnInfo(name = "display_name") val displayName: String,
     @ColumnInfo(name = "root_tree_uri") val rootTreeUri: String,
     @ColumnInfo(name = "is_active") val isActive: Boolean = false,
-    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
+    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
+    // "AUDIO" = folder of recordings (the original model); "TEXT" = TTS over a stored
+    // translation referenced by [translationId].
+    @ColumnInfo(name = "source_type") val sourceType: String = "AUDIO",
+    @ColumnInfo(name = "translation_id") val translationId: Long? = null
 )
 
 // Each row maps one Bible book to its folder within a source.
 // overrideTreeUri is non-null only when the user manually picked a different folder
 // (which may live outside the source's original root tree).
+@Serializable
 @Entity(
     tableName = "book_mappings",
     primaryKeys = ["sourceId", "bookName"],
@@ -91,6 +98,9 @@ interface AudioSourceDao {
 
     @Query("DELETE FROM book_mappings WHERE sourceId = :sourceId AND bookName = :bookName")
     suspend fun deleteMapping(sourceId: Long, bookName: String)
+
+    @Query("DELETE FROM book_mappings WHERE sourceId = :sourceId")
+    suspend fun clearMappingsForSource(sourceId: Long)
 
     @Query("DELETE FROM book_mappings")
     suspend fun clearAllMappings()

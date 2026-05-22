@@ -10,9 +10,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ReadingListEntity::class,
         ListBookEntity::class,
         AudioSourceEntity::class,
-        BookMappingEntity::class
+        BookMappingEntity::class,
+        BibleTranslationEntity::class,
+        BibleTextEntity::class
     ],
-    version = 8,
+    version = 9,
     // #19: Schema export enabled — Room will write JSON schema files to the directory
     // configured via room.schemaLocation in build.gradle.kts. This acts as a free
     // migration safety net and documents the schema history in version control.
@@ -21,6 +23,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 abstract class AppDatabase : RoomDatabase() {
     abstract fun bibleDao(): BibleDao
     abstract fun audioSourceDao(): AudioSourceDao
+    abstract fun bibleTextDao(): BibleTextDao
 }
 
 // #16: Handles upgrades from the very first schema (v1) which lacked list_order.
@@ -36,6 +39,43 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
 val MIGRATION_7_8 = object : Migration(7, 8) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE reading_lists ADD COLUMN list_color INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+// v8 → v9: text-Bible support. Add source type + translation pointer to audio_sources, and
+// create the translation/text store tables for TTS playback.
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE audio_sources ADD COLUMN source_type TEXT NOT NULL DEFAULT 'AUDIO'")
+        db.execSQL("ALTER TABLE audio_sources ADD COLUMN translation_id INTEGER")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS bible_translations (
+                translationId INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                name          TEXT NOT NULL,
+                abbrev        TEXT NOT NULL,
+                language      TEXT NOT NULL DEFAULT 'en',
+                origin        TEXT NOT NULL DEFAULT 'DOWNLOAD',
+                has_apocrypha INTEGER NOT NULL DEFAULT 0,
+                license       TEXT,
+                attribution   TEXT,
+                installed_at  INTEGER NOT NULL DEFAULT 0
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS bible_texts (
+                translationId INTEGER NOT NULL,
+                book          TEXT NOT NULL,
+                chapter       INTEGER NOT NULL,
+                text          TEXT NOT NULL,
+                PRIMARY KEY (translationId, book, chapter),
+                FOREIGN KEY (translationId) REFERENCES bible_translations(translationId) ON DELETE CASCADE
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_bible_texts_translationId ON bible_texts(translationId)")
     }
 }
 

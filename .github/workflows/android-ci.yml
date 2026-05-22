@@ -1,0 +1,67 @@
+name: Android CI
+
+# Runs the full compile + unit tests on GitHub-hosted runners (which have the
+# Android SDK and access to Google Maven, unlike the dev sandbox).
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build and test
+        id: build
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --stacktrace testDebugUnitTest assembleDebug 2>&1 | tee build-output.txt
+
+      - name: Surface failure log to PR
+        if: failure() && github.event.pull_request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "### Android CI build failed"
+            echo ""
+            echo "#### Kotlin compiler diagnostics (e:/w: lines)"
+            echo '```'
+            grep -nE "^(e|w): " build-output.txt | head -n 150 || echo "(none)"
+            echo '```'
+            echo "#### Failure summary"
+            echo '```'
+            grep -nE "FAILURE:|FAILED|What went wrong|Compilation error|Unresolved reference|error:" build-output.txt | head -n 60 || echo "(none)"
+            echo '```'
+          } > comment.md
+          gh pr comment ${{ github.event.pull_request.number }} --body-file comment.md
+
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn

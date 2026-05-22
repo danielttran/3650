@@ -1,10 +1,13 @@
 package com.Bible3650.www.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
@@ -13,15 +16,19 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.Bible3650.www.R
+import com.Bible3650.www.data.BibleRegistry
 
 @Composable
 fun HomeScreen(
@@ -47,7 +54,7 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "Go to Lists → Audio Sources and browse to a folder containing your audio Bible files.",
+                        stringResource(R.string.msg_no_audio_source_hint),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -55,6 +62,9 @@ fun HomeScreen(
                 }
             }
             is DashboardUiState.Active -> {
+                var showFullPlayer by rememberSaveable { mutableStateOf(false) }
+                var jumpTarget by remember { mutableStateOf<TaskUiModel?>(null) }
+                val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
                 val playingTask = remember(uiState.tasks, currentMediaId) {
                     uiState.tasks.find { it.id == currentMediaId }
                 }
@@ -77,6 +87,33 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                     )
 
+                    // Resume-first CTA (#8): one tap to continue or start the rolling lists.
+                    if (!isPlaying) {
+                        val canResume = currentMediaId != null && playingTask != null
+                        val resumeTask = playingTask ?: uiState.tasks.firstOrNull()
+                        if (resumeTask != null) {
+                            FilledTonalButton(
+                                onClick = {
+                                    if (canResume) {
+                                        viewModel.dispatchAction(DashboardAction.PlayPause)
+                                    } else {
+                                        viewModel.dispatchAction(DashboardAction.PlayFrom(resumeTask.id))
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (canResume) stringResource(R.string.resume_with_chapter, playingTask!!.subtitle)
+                                    else stringResource(R.string.play_all_lists)
+                                )
+                            }
+                        }
+                    }
+
                     // Scrollable task list + floating mini-player
                     Box(Modifier.weight(1f)) {
                         LazyColumn(
@@ -90,6 +127,7 @@ fun HomeScreen(
                                     onPlayClick = {
                                         viewModel.dispatchAction(DashboardAction.PlayFrom(task.id))
                                     },
+                                    onJump = { jumpTarget = task },
                                     onDecrement = {
                                         viewModel.dispatchAction(DashboardAction.DecrementProgress(task.listId))
                                     },
@@ -106,9 +144,32 @@ fun HomeScreen(
                         MiniPlayerBar(
                             playingTask = playingTask,
                             viewModel = viewModel,
+                            onExpand = { showFullPlayer = true },
                             modifier = Modifier.align(Alignment.BottomCenter)
                         )
                     }
+                }
+
+                // Full-screen Now Playing overlay (#5)
+                if (showFullPlayer) {
+                    NowPlayingScreen(
+                        tasks = uiState.tasks,
+                        currentMediaId = currentMediaId,
+                        viewModel = viewModel,
+                        onCollapse = { showFullPlayer = false }
+                    )
+                }
+
+                // Jump-to-chapter dialog (#6) — opened by long-pressing a list row.
+                jumpTarget?.let { target ->
+                    JumpToChapterDialog(
+                        task = target,
+                        onDismiss = { jumpTarget = null },
+                        onJump = { book, chapter ->
+                            viewModel.jumpToChapter(target.listId, book, chapter)
+                            jumpTarget = null
+                        }
+                    )
                 }
             }
         }
@@ -119,6 +180,7 @@ fun HomeScreen(
 private fun MiniPlayerBar(
     playingTask: TaskUiModel?,
     viewModel: DashboardViewModel,
+    onExpand: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
@@ -145,18 +207,19 @@ private fun MiniPlayerBar(
                     .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                // Tapping the title area expands the full Now Playing screen.
+                Column(modifier = Modifier.weight(1f).clickable { onExpand() }) {
                     Text(
-                        "${playingTask?.title ?: "Audio Player"} (${playingTask?.totalChapters ?: 0})",
+                        playingTask.title,
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
                         maxLines = 1
                     )
                     Text(
-                        playingTask?.subtitle ?: "Playing…",
+                        playingTask.subtitle,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                         maxLines = 1
                     )
                     TimeRemainingText(duration = duration, viewModel = viewModel)
@@ -170,7 +233,7 @@ private fun MiniPlayerBar(
                         imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = "Play/Pause",
                         modifier = Modifier.size(52.dp),
-                        tint = MaterialTheme.colorScheme.onSurface
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
                     )
                 }
 
@@ -182,7 +245,7 @@ private fun MiniPlayerBar(
                         imageVector = Icons.Default.SkipNext,
                         contentDescription = "Skip",
                         modifier = Modifier.size(52.dp),
-                        tint = MaterialTheme.colorScheme.onSurface
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
                     )
                 }
             }
@@ -230,16 +293,19 @@ private fun TimeRemainingText(duration: Long, viewModel: DashboardViewModel) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ListEntryItem(
     task: TaskUiModel,
     isPlaying: Boolean,
     onPlayClick: () -> Unit,
+    onJump: () -> Unit,
     onDecrement: () -> Unit,
     onIncrement: () -> Unit
 ) {
     val listColor = if (task.listColor != 0) Color(task.listColor) else null
-    
+    val surface = MaterialTheme.colorScheme.surface
+
     val backgroundColor = when {
         isPlaying && listColor != null -> listColor.copy(alpha = 0.85f)
         isPlaying -> MaterialTheme.colorScheme.primaryContainer
@@ -247,27 +313,30 @@ fun ListEntryItem(
         else -> MaterialTheme.colorScheme.surface
     }
 
-    val titleColor = when {
-        isPlaying && listColor != null -> Color.Black
-        isPlaying -> MaterialTheme.colorScheme.primary
-        listColor != null -> Color.Black
-        else -> MaterialTheme.colorScheme.onSurface
-    }
-
-    val subtitleColor = when {
-        listColor != null -> Color.Black.copy(alpha = 0.7f)
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    val iconColor = when {
-        listColor != null -> Color.Black.copy(alpha = 0.7f)
-        else -> MaterialTheme.colorScheme.primary
+    val titleColor: Color
+    val subtitleColor: Color
+    val iconColor: Color
+    if (listColor != null) {
+        // Composite the translucent list color over the real surface so the chosen
+        // on-color stays readable in both light and dark themes.
+        val effectiveBg = backgroundColor.compositeOver(surface)
+        titleColor = contentColorOn(effectiveBg)
+        subtitleColor = titleColor.copy(alpha = 0.7f)
+        iconColor = titleColor.copy(alpha = 0.85f)
+    } else if (isPlaying) {
+        titleColor = MaterialTheme.colorScheme.onPrimaryContainer
+        subtitleColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+        iconColor = MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        titleColor = MaterialTheme.colorScheme.onSurface
+        subtitleColor = MaterialTheme.colorScheme.onSurfaceVariant
+        iconColor = MaterialTheme.colorScheme.primary
     }
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onPlayClick() },
+            .combinedClickable(onClick = onPlayClick, onLongClick = onJump),
         color = backgroundColor,
     ) {
         Box {
@@ -280,14 +349,14 @@ fun ListEntryItem(
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "${task.title} (${task.totalChapters})",
+                            text = task.title,
                             style = MaterialTheme.typography.titleMedium,
                             color = titleColor
                         )
                         if (isPlaying) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                "Now Playing",
+                                stringResource(R.string.now_playing),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = titleColor,
                                 fontWeight = FontWeight.Bold
@@ -299,6 +368,28 @@ fun ListEntryItem(
                         style = MaterialTheme.typography.bodyMedium,
                         color = subtitleColor
                     )
+                    // Loop-progress indicator (#7): where this list sits in its cycle.
+                    if (task.totalChapters > 0) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            LinearProgressIndicator(
+                                progress = {
+                                    (task.loopPosition.toFloat() / task.totalChapters).coerceIn(0f, 1f)
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(4.dp),
+                                color = iconColor,
+                                trackColor = iconColor.copy(alpha = 0.2f)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "${task.loopPosition} / ${task.totalChapters}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = subtitleColor
+                            )
+                        }
+                    }
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -320,4 +411,71 @@ fun ListEntryItem(
             )
         }
     }
+}
+
+@Composable
+private fun JumpToChapterDialog(
+    task: TaskUiModel,
+    onDismiss: () -> Unit,
+    onJump: (book: String, chapter: Int) -> Unit
+) {
+    val books = task.books.ifEmpty { listOf(task.targetBook) }
+    var selectedBook by remember {
+        mutableStateOf(if (task.targetBook in books) task.targetBook else books.first())
+    }
+    var chapterText by remember { mutableStateOf(task.targetChapter.toString()) }
+    var bookMenuOpen by remember { mutableStateOf(false) }
+
+    val maxChapter = BibleRegistry.getChapterCount(selectedBook).coerceAtLeast(1)
+    val parsedChapter = chapterText.toIntOrNull()
+    val valid = parsedChapter != null && parsedChapter in 1..maxChapter
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.jump_to_chapter)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    task.title,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (books.size > 1) {
+                    Box {
+                        OutlinedButton(onClick = { bookMenuOpen = true }) { Text(selectedBook) }
+                        DropdownMenu(expanded = bookMenuOpen, onDismissRequest = { bookMenuOpen = false }) {
+                            books.forEach { b ->
+                                DropdownMenuItem(
+                                    text = { Text(b) },
+                                    onClick = {
+                                        selectedBook = b
+                                        chapterText = "1"
+                                        bookMenuOpen = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Text(selectedBook, style = MaterialTheme.typography.titleSmall)
+                }
+                OutlinedTextField(
+                    value = chapterText,
+                    onValueChange = { chapterText = it.filter { c -> c.isDigit() }.take(3) },
+                    label = { Text(stringResource(R.string.chapter_range, maxChapter)) },
+                    singleLine = true,
+                    isError = chapterText.isNotEmpty() && !valid,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = valid, onClick = { onJump(selectedBook, parsedChapter ?: 1) }) {
+                Text(stringResource(R.string.action_jump))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+        }
+    )
 }

@@ -49,9 +49,9 @@ fun ProfileScreen(
                             stream.write(json.toByteArray())
                         }
                     }
-                    snackbarHostState.showSnackbar("Progress exported successfully")
+                    snackbarHostState.showSnackbar(context.getString(R.string.progress_exported))
                 } catch (e: Exception) {
-                    snackbarHostState.showSnackbar("Export failed")
+                    snackbarHostState.showSnackbar(context.getString(R.string.export_failed))
                 }
             }
         }
@@ -75,10 +75,10 @@ fun ProfileScreen(
                         pendingImportJson = json
                         showImportConfirm = true
                     } else {
-                        snackbarHostState.showSnackbar("Failed to read backup file (file may be too large or unreadable)")
+                        snackbarHostState.showSnackbar(context.getString(R.string.backup_read_failed_large))
                     }
                 } catch (e: Exception) {
-                    snackbarHostState.showSnackbar("Failed to read backup file")
+                    snackbarHostState.showSnackbar(context.getString(R.string.backup_read_failed))
                 }
             }
         }
@@ -109,7 +109,7 @@ fun ProfileScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "Total Chapters",
+                        text = stringResource(R.string.total_chapters),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
@@ -128,7 +128,7 @@ fun ProfileScreen(
                         ),
                         modifier = Modifier.padding(top = 8.dp)
                     ) {
-                        Text("Reset Total Stats")
+                        Text(stringResource(R.string.reset_total_stats))
                     }
 
                     Row(
@@ -136,7 +136,7 @@ fun ProfileScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedButton(onClick = { exportLauncher.launch("bible3650_backup.json") }) {
-                            Text("Export Progress")
+                            Text(stringResource(R.string.export_progress))
                         }
                         OutlinedButton(onClick = {
                             importLauncher.launch(
@@ -146,14 +146,14 @@ fun ProfileScreen(
                                 )
                             )
                         }) {
-                            Text("Import Progress")
+                            Text(stringResource(R.string.import_progress))
                         }
                     }
                 }
             }
 
             Text(
-                text = "Books Completed Stats",
+                text = stringResource(R.string.books_completed_stats),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
@@ -172,14 +172,9 @@ fun ProfileScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(uiState.bookStats, key = { it.bookName }) { stat ->
-                    val cardColor = when {
-                        stat.listColor != 0 -> Color(stat.listColor)
-                        else -> MaterialTheme.colorScheme.surfaceVariant
-                    }
-                    val contentColor = when {
-                        stat.listColor != 0 -> Color(0xFF1E1E1E) // Dark gray/black text
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    }
+                    val hasColor = stat.listColor != 0
+                    val cardColor = if (hasColor) Color(stat.listColor) else MaterialTheme.colorScheme.surfaceVariant
+                    val contentColor = if (hasColor) contentColorOn(cardColor) else MaterialTheme.colorScheme.onSurfaceVariant
                     Card(
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = cardColor, contentColor = contentColor)
@@ -201,9 +196,9 @@ fun ProfileScreen(
                                 text = "(${stat.readCount})",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (stat.readCount > 0)
-                                    if (stat.listColor != 0) Color.Black else MaterialTheme.colorScheme.primary
+                                    if (hasColor) contentColor else MaterialTheme.colorScheme.primary
                                 else
-                                    if (stat.listColor != 0) Color(0xFF1E1E1E).copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant
+                                    if (hasColor) contentColor.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -214,8 +209,8 @@ fun ProfileScreen(
     if (showImportConfirm) {
         AlertDialog(
             onDismissRequest = { showImportConfirm = false },
-            title = { Text("Restore Progress?") },
-            text = { Text("This will overwrite your current Listening Lists and all statistics. This action cannot be undone.") },
+            title = { Text(stringResource(R.string.restore_progress_q)) },
+            text = { Text(stringResource(R.string.restore_progress_warning)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -224,18 +219,18 @@ fun ProfileScreen(
                             scope.launch {
                                 val success = viewModel.importData(json)
                                 if (success) {
-                                    snackbarHostState.showSnackbar("Progress restored successfully")
+                                    snackbarHostState.showSnackbar(context.getString(R.string.progress_restored))
                                 } else {
-                                    snackbarHostState.showSnackbar("Error: Invalid backup file")
+                                    snackbarHostState.showSnackbar(context.getString(R.string.restore_invalid))
                                 }
                             }
                         }
                         showImportConfirm = false
                     }
-                ) { Text("Restore", color = MaterialTheme.colorScheme.error) }
+                ) { Text(stringResource(R.string.action_restore), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { showImportConfirm = false }) { Text("Cancel") }
+                TextButton(onClick = { showImportConfirm = false }) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }

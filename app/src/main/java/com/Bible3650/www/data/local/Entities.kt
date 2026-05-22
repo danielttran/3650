@@ -2,6 +2,7 @@ package com.Bible3650.www.data.local
 
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
 
 data class DailyTask(
     val listId: Long,
@@ -10,10 +11,16 @@ data class DailyTask(
     val targetBook: String,
     val targetChapter: Int,
     val totalChapters: Int = 0,
+    // Cumulative position (1..totalChapters) of the current chapter within this list's
+    // full cycle — used for the loop-progress indicator.
+    val loopPosition: Int = 0,
+    // Book names in this list (sorted) — used to populate the jump-to-chapter picker.
+    val books: List<String> = emptyList(),
     val fileUri: String = "",
     val listColor: Int = 0
 )
 
+@Serializable
 @Entity(
     tableName = "reading_lists",
     indices = [Index(value = ["list_name"], unique = true)]
@@ -33,6 +40,7 @@ data class ReadingListEntity(
     @ColumnInfo(name = "list_color") val listColor: Int = 0
 )
 
+@Serializable
 @Entity(
     tableName = "list_books",
     foreignKeys = [
@@ -83,6 +91,10 @@ interface BibleDao {
 
     @Query("SELECT * FROM reading_lists WHERE listId = :id")
     suspend fun getListById(id: Long): ReadingListEntity?
+
+    @Transaction
+    @Query("SELECT * FROM reading_lists WHERE listId = :id")
+    suspend fun getListWithBooksById(id: Long): ListWithBooks?
 
     @Query("UPDATE reading_lists SET current_absolute_day = :newIndex, active_book = :newBook, active_chapter = :newChapter WHERE listId = :id")
     suspend fun updateListProgress(id: Long, newIndex: Int, newBook: String?, newChapter: Int?)

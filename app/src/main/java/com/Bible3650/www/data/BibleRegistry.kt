@@ -1,9 +1,15 @@
 package com.Bible3650.www.data
 
 object BibleRegistry {
-    data class BibleBook(val name: String, val chapterCount: Int)
+    enum class Canon { CANONICAL, APOCRYPHA }
 
-    private val books = listOf(
+    data class BibleBook(
+        val name: String,
+        val chapterCount: Int,
+        val canon: Canon = Canon.CANONICAL
+    )
+
+    private val canonicalBooks = listOf(
         // Old Testament
         BibleBook("Genesis",        50),
         BibleBook("Exodus",         40),
@@ -75,9 +81,55 @@ object BibleRegistry {
         BibleBook("Revelation",     22)
     )
 
-    private val chapterCountByName: Map<String, Int> = books.associate { it.name to it.chapterCount }
-    private val allBookNames: List<String> = books.map { it.name }
+    // Deuterocanonical / apocryphal books (Catholic + Orthodox superset), in the traditional
+    // (KJV-Apocrypha / LXX) ordering. Chapter counts follow common single-folder-per-book
+    // layouts; one-part pieces use a count of 1 so they resolve to the first file.
+    private val apocryphaBooks = listOf(
+        BibleBook("1 Esdras",                 9, Canon.APOCRYPHA),
+        BibleBook("2 Esdras",                16, Canon.APOCRYPHA),
+        BibleBook("Tobit",                   14, Canon.APOCRYPHA),
+        BibleBook("Judith",                  16, Canon.APOCRYPHA),
+        BibleBook("Additions to Esther",      6, Canon.APOCRYPHA),
+        BibleBook("Wisdom of Solomon",       19, Canon.APOCRYPHA),
+        BibleBook("Sirach",                  51, Canon.APOCRYPHA),
+        BibleBook("Baruch",                   6, Canon.APOCRYPHA),
+        BibleBook("Prayer of Azariah",        1, Canon.APOCRYPHA),
+        BibleBook("Susanna",                  1, Canon.APOCRYPHA),
+        BibleBook("Bel and the Dragon",       1, Canon.APOCRYPHA),
+        BibleBook("Prayer of Manasseh",       1, Canon.APOCRYPHA),
+        BibleBook("1 Maccabees",             16, Canon.APOCRYPHA),
+        BibleBook("2 Maccabees",             15, Canon.APOCRYPHA),
+        BibleBook("3 Maccabees",              7, Canon.APOCRYPHA),
+        BibleBook("4 Maccabees",             18, Canon.APOCRYPHA),
+        BibleBook("Psalm 151",                1, Canon.APOCRYPHA)
+    )
+
+    private val allBooks = canonicalBooks + apocryphaBooks
+
+    // Chapter counts cover BOTH canons so apocryphal books contribute chapters to the reading
+    // plan and resolve audio files just like canonical books.
+    private val chapterCountByName: Map<String, Int> = allBooks.associate { it.name to it.chapterCount }
+    private val canonByName: Map<String, Canon> = allBooks.associate { it.name to it.canon }
+
+    private val allBookNames: List<String> = canonicalBooks.map { it.name }
+    private val apocryphaBookNames: List<String> = apocryphaBooks.map { it.name }
+    private val allKnownBookNames: List<String> = allBooks.map { it.name }
 
     fun getChapterCount(bookName: String): Int = chapterCountByName[bookName] ?: 0
+
+    /** The 66 canonical books. Unchanged contract — validation, default plans, "N/66" UI. */
     fun getAllBooks(): List<String> = allBookNames
+
+    /** Alias of [getAllBooks] for call sites that want to be explicit about the canon. */
+    fun getCanonicalBooks(): List<String> = allBookNames
+
+    /** Apocryphal/deuterocanonical books in traditional order. */
+    fun getApocryphalBooks(): List<String> = apocryphaBookNames
+
+    /** Canonical 66 + apocrypha — used by detection so apocrypha folders can match. */
+    fun getAllKnownBooks(): List<String> = allKnownBookNames
+
+    fun getCanon(bookName: String): Canon? = canonByName[bookName]
+
+    fun isApocryphal(bookName: String): Boolean = canonByName[bookName] == Canon.APOCRYPHA
 }

@@ -30,7 +30,7 @@ class BookDetectionEngine @Inject constructor(
             fileSystem.getTreeDocumentId(rootTreeUri)
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Invalid tree URI: $rootTreeUri", e)
-            return BibleRegistry.getAllBooks().map { DetectionResult(it, null, 0f, 0) }
+            return BibleRegistry.getAllKnownBooks().map { DetectionResult(it, null, 0f, 0) }
         }
 
         val rootName = try {
@@ -44,11 +44,11 @@ class BookDetectionEngine @Inject constructor(
         collectLeafFolders(rootTreeUri, rootDocId, rootName, leafFolders, depth = 0)
 
         if (leafFolders.isEmpty()) {
-            return BibleRegistry.getAllBooks().map { DetectionResult(it, null, 0f, 0) }
+            return BibleRegistry.getAllKnownBooks().map { DetectionResult(it, null, 0f, 0) }
         }
 
         val allSameCount = leafFolders.size > 1 && leafFolders.all { it.mp3Count == leafFolders[0].mp3Count }
-        val allBooks = BibleRegistry.getAllBooks()
+        val allBooks = BibleRegistry.getAllKnownBooks()
 
         data class Candidate(val folder: FolderInfo, val bookName: String, val score: Float)
         val candidates = mutableListOf<Candidate>()
@@ -332,7 +332,26 @@ class BookDetectionEngine @Inject constructor(
             "2 John"           to listOf("2 john", "2john", "2 joh", "2joh", "2jn", "ii john", "second john", "2nd john"),
             "3 John"           to listOf("3 john", "3john", "3 joh", "3joh", "3jn", "iii john", "third john", "3rd john"),
             "Jude"             to listOf("jude"),
-            "Revelation"       to listOf("revelation", "revelations", "rev")
+            "Revelation"       to listOf("revelation", "revelations", "rev"),
+
+            // Apocrypha / deuterocanon
+            "1 Esdras"            to listOf("1 esdras", "1esdras", "1 esd", "1esd", "i esdras", "first esdras", "1st esdras", "3 ezra"),
+            "2 Esdras"            to listOf("2 esdras", "2esdras", "2 esd", "2esd", "ii esdras", "second esdras", "2nd esdras", "4 ezra"),
+            "Tobit"               to listOf("tobit", "tob", "tobias"),
+            "Judith"              to listOf("judith", "jdt"),
+            "Additions to Esther" to listOf("additions to esther", "rest of esther", "greek esther", "esther additions", "add esther"),
+            "Wisdom of Solomon"   to listOf("wisdom of solomon", "wisdom", "wis", "ws"),
+            "Sirach"              to listOf("sirach", "ecclesiasticus", "ben sira", "sir"),
+            "Baruch"              to listOf("baruch", "bar", "letter of jeremiah", "epistle of jeremy"),
+            "Prayer of Azariah"   to listOf("prayer of azariah", "song of three young men", "song of three", "azariah"),
+            "Susanna"             to listOf("susanna", "sus"),
+            "Bel and the Dragon"  to listOf("bel and dragon", "bel and the dragon", "bel"),
+            "Prayer of Manasseh"  to listOf("prayer of manasseh", "manasseh", "manasses", "pr man"),
+            "1 Maccabees"         to listOf("1 maccabees", "1maccabees", "1 macc", "1macc", "1 mac", "i maccabees", "first maccabees", "1st maccabees"),
+            "2 Maccabees"         to listOf("2 maccabees", "2maccabees", "2 macc", "2macc", "2 mac", "ii maccabees", "second maccabees", "2nd maccabees"),
+            "3 Maccabees"         to listOf("3 maccabees", "3maccabees", "3 macc", "3macc", "3 mac", "iii maccabees", "third maccabees", "3rd maccabees"),
+            "4 Maccabees"         to listOf("4 maccabees", "4maccabees", "4 macc", "4macc", "4 mac", "iv maccabees", "fourth maccabees", "4th maccabees"),
+            "Psalm 151"           to listOf("psalm 151", "psalm151", "ps 151", "ps151")
         )
     }
 }

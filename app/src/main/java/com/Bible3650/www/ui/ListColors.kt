@@ -1,6 +1,7 @@
 package com.Bible3650.www.ui
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 
 /**
@@ -41,3 +42,11 @@ fun nextSuggestedColorArgb(listIndex: Int): Int {
     val index = listIndex.coerceAtLeast(0) % ListColorPalette.size
     return ListColorPalette[index].toArgb()
 }
+
+/**
+ * Returns a readable on-color (near-black or near-white) for text/icons drawn on top of
+ * an arbitrary [background], chosen by relative luminance so contrast holds for both the
+ * light pastel swatches and any darker user-picked colors.
+ */
+fun contentColorOn(background: Color): Color =
+    if (background.luminance() > 0.5f) Color(0xFF1A1A1A) else Color(0xFFF5F5F5)

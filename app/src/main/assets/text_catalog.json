@@ -1,0 +1,35 @@
+[
+  {
+    "id": "web",
+    "name": "World English Bible",
+    "abbrev": "WEB",
+    "language": "en",
+    "hasApocrypha": false,
+    "adapter": "PASSAGE_API",
+    "format": "JSON",
+    "url": "https://bible-api.com/{book}+{chapter}?translation=web",
+    "needsKey": false,
+    "license": "Public Domain",
+    "attribution": "World English Bible (Public Domain)",
+    "bookNameOverrides": {
+      "Psalm": "Psalms",
+      "Song of Songs": "Song of Solomon"
+    }
+  },
+  {
+    "id": "net",
+    "name": "NET Bible",
+    "abbrev": "NET",
+    "language": "en",
+    "hasApocrypha": false,
+    "adapter": "PASSAGE_API",
+    "format": "JSON",
+    "url": "https://labs.bible.org/api/?passage={book}+{chapter}&type=json",
+    "needsKey": false,
+    "license": "NET Bible® — free use with attribution",
+    "attribution": "Scripture quoted by permission from the NET Bible® (https://netbible.com)",
+    "bookNameOverrides": {
+      "Psalm": "Psalms"
+    }
+  }
+]

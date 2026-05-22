@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
 import com.Bible3650.www.audio.AudioControllerManager
+import com.Bible3650.www.audio.SleepTimer
 import com.Bible3650.www.data.BibleRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -20,7 +21,11 @@ data class TaskUiModel(
     val listId: Long,
     val title: String,
     val subtitle: String,
+    val targetBook: String,
+    val targetChapter: Int,
     val totalChapters: Int,
+    val loopPosition: Int = 0,
+    val books: List<String> = emptyList(),
     val fileUri: String,
     val listColor: Int = 0
 )
@@ -32,17 +37,18 @@ sealed interface DashboardUiState {
 }
 
 sealed interface DashboardAction {
-    data class CompleteTask(val listId: Long) : DashboardAction
-    data class UndoComplete(val listId: Long) : DashboardAction
     data class IncrementProgress(val listId: Long) : DashboardAction
     data class DecrementProgress(val listId: Long) : DashboardAction
     data class PlayFrom(val taskId: String) : DashboardAction
     object PlayPause : DashboardAction
     object SkipNext : DashboardAction
+    object SkipPrevious : DashboardAction
+    object Rewind : DashboardAction
+    object FastForward : DashboardAction
 }
 
 sealed interface DashboardUiEvent {
-    data class ShowSnackbar(val message: String, val actionLabel: String, val listId: Long) : DashboardUiEvent
+    data class ShowSnackbar(val message: String) : DashboardUiEvent
 }
 
 @HiltViewModel
@@ -72,7 +78,11 @@ class DashboardViewModel @Inject constructor(
                 listId        = task.listId,
                 title         = task.listName,
                 subtitle      = "${task.targetBook} ${task.targetChapter}",
+                targetBook    = task.targetBook,
+                targetChapter = task.targetChapter,
                 totalChapters = task.totalChapters,
+                loopPosition  = task.loopPosition,
+                books         = task.books,
                 fileUri       = task.fileUri,
                 listColor     = task.listColor
             )
@@ -100,11 +110,7 @@ class DashboardViewModel @Inject constructor(
         // #13: Forward audio playback errors (e.g. unresolvable URI) as snackbar events.
         viewModelScope.launch {
             audioManager.playerError.collect { errorMsg ->
-                _uiEvents.emit(DashboardUiEvent.ShowSnackbar(
-                    message = errorMsg,
-                    actionLabel = "",
-                    listId = -1L
-                ))
+                _uiEvents.emit(DashboardUiEvent.ShowSnackbar(errorMsg))
             }
         }
         // Track completion is handled inside AudioControllerManager's own scope,
@@ -114,6 +120,15 @@ class DashboardViewModel @Inject constructor(
     val isPlaying: StateFlow<Boolean> = audioManager.isPlaying
     val currentPosition: StateFlow<Long> = audioManager.currentPosition
     val duration: StateFlow<Long> = audioManager.duration
+    val playbackSpeed: StateFlow<Float> = audioManager.playbackSpeed
+    val sleepTimer: StateFlow<SleepTimer> = audioManager.sleepTimer
+    val isSynthesizing: StateFlow<Boolean> = audioManager.isSynthesizing
+
+    fun setSpeed(speed: Float) = audioManager.setPlaybackSpeed(speed)
+    fun seekTo(positionMs: Long) = audioManager.seekTo(positionMs)
+    fun setSleepTimerMinutes(minutes: Int) = audioManager.setSleepTimerMinutes(minutes)
+    fun setSleepTimerEndOfChapter() = audioManager.setSleepTimerEndOfChapter()
+    fun cancelSleepTimer() = audioManager.cancelSleepTimer()
 
     private suspend fun syncPlayerIfPlaying(listId: Long) {
         val currentId = currentMediaId.value ?: return
@@ -159,20 +174,16 @@ class DashboardViewModel @Inject constructor(
         audioManager.playTasks(tasks, index, savedPos, playWhenReady = false)
     }
 
+    fun jumpToChapter(listId: Long, book: String, chapter: Int) {
+        viewModelScope.launch {
+            repository.jumpToChapter(listId, book, chapter)
+            syncPlayerIfPlaying(listId)
+        }
+    }
+
     fun dispatchAction(action: DashboardAction) {
         android.util.Log.d("DashboardVM", "Dispatching action: $action")
         when (action) {
-            is DashboardAction.CompleteTask -> viewModelScope.launch {
-                repository.advanceListDay(action.listId)
-                _uiEvents.emit(DashboardUiEvent.ShowSnackbar(
-                    message = "Task completed",
-                    actionLabel = "Undo",
-                    listId = action.listId
-                ))
-            }
-            is DashboardAction.UndoComplete -> viewModelScope.launch {
-                repository.revertListDay(action.listId)
-            }
             is DashboardAction.IncrementProgress -> viewModelScope.launch {
                 repository.incrementManualOffset(action.listId)
                 syncPlayerIfPlaying(action.listId)
@@ -194,6 +205,9 @@ class DashboardViewModel @Inject constructor(
             }
             is DashboardAction.PlayPause -> audioManager.togglePlayPause()
             is DashboardAction.SkipNext  -> audioManager.skipToNext()
+            is DashboardAction.SkipPrevious -> audioManager.skipToPrevious()
+            is DashboardAction.Rewind -> audioManager.rewind()
+            is DashboardAction.FastForward -> audioManager.fastForward()
         }
     }
 }

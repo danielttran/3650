@@ -6,13 +6,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- Required on API 33+ for the runtime POST_NOTIFICATIONS request in MainActivity -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Downloading public-domain / permissively-licensed text Bibles from the catalog. -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:name=".BibleApplication"
         android:allowBackup="false"
-        android:largeHeap="true"
-        android:dataExtractionRules="@xml/data_extraction_rules"
-        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"

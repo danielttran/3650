@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -30,9 +32,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -55,6 +64,11 @@ fun ManageListsScreen(
     val lists by viewModel.listsFlow.collectAsStateWithLifecycle()
     val sources by sourceViewModel.sources.collectAsStateWithLifecycle()
     val detectionState by sourceViewModel.detectionState.collectAsStateWithLifecycle()
+    val unavailableSourceIds by sourceViewModel.unavailableSourceIds.collectAsStateWithLifecycle()
+    val apocryphaSuggestion by sourceViewModel.apocryphaSuggestion.collectAsStateWithLifecycle()
+    val catalog by sourceViewModel.catalog.collectAsStateWithLifecycle()
+    val textOpState by sourceViewModel.textOpState.collectAsStateWithLifecycle()
+    var showTextBibleDialog by remember { mutableStateOf(false) }
 
     var showListDialog by remember { mutableStateOf(false) }
     var editingList by remember { mutableStateOf<com.Bible3650.www.data.local.ReadingListEntity?>(null) }
@@ -62,9 +76,20 @@ fun ManageListsScreen(
     var selectedBooks by remember { mutableStateOf<List<String>>(emptyList()) }
     var selectedColor by remember { mutableStateOf(0) }
     var pendingDeleteList by remember { mutableStateOf<com.Bible3650.www.data.local.ReadingListEntity?>(null) }
+    var pendingRelinkSourceId by remember { mutableStateOf<Long?>(null) }
 
     val validationResults by viewModel.validationResults.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    // #12: Check whether the saved audio folders are still accessible whenever the screen opens.
+    LaunchedEffect(Unit) { sourceViewModel.refreshSourceHealth() }
+
+    fun suggestedNameFor(uri: android.net.Uri): String =
+        uri.lastPathSegment
+            ?.substringAfterLast('/')
+            ?.substringAfterLast(':')
+            ?.ifBlank { "Audio Bible" }
+            ?: "Audio Bible"
 
     val folderPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -79,12 +104,24 @@ fun ManageListsScreen(
             } catch (e: SecurityException) {
                 android.util.Log.e("ManageLists", "Provider does not support persistable URIs", e)
             }
-            val suggested = uri.lastPathSegment
-                ?.substringAfterLast('/')
-                ?.substringAfterLast(':')
-                ?.ifBlank { "Audio Bible" }
-                ?: "Audio Bible"
-            sourceViewModel.onRootFolderPicked(uri, suggested)
+            sourceViewModel.onRootFolderPicked(uri, suggestedNameFor(uri))
+        }
+    }
+
+    val relinkLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        val sourceId = pendingRelinkSourceId
+        pendingRelinkSourceId = null
+        if (uri != null && sourceId != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: SecurityException) {
+                android.util.Log.e("ManageLists", "Provider does not support persistable URIs", e)
+            }
+            sourceViewModel.relinkSource(sourceId, uri, suggestedNameFor(uri))
         }
     }
 
@@ -92,6 +129,20 @@ fun ManageListsScreen(
         if (detectionState is DetectionState.Done) {
             onReviewMappings((detectionState as DetectionState.Done).sourceId)
             sourceViewModel.resetDetectionState()
+        }
+    }
+
+    val importTextLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (e: SecurityException) {
+                android.util.Log.w("ManageLists", "No persistable permission for imported text", e)
+            }
+            sourceViewModel.importText(uri, suggestedNameFor(uri))
+            showTextBibleDialog = false
         }
     }
 
@@ -112,6 +163,89 @@ fun ManageListsScreen(
         sourceViewModel.uiEvents.collect { message ->
             snackbarHostState.showSnackbar(message)
         }
+    }
+
+    if (apocryphaSuggestion.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { sourceViewModel.dismissApocryphaSuggestion() },
+            title = { Text(stringResource(R.string.apocrypha_detected_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.apocrypha_detected_message,
+                        apocryphaSuggestion.size,
+                        apocryphaSuggestion.joinToString(", ")
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { sourceViewModel.createOrUpdateApocryphaList() }) {
+                    Text(stringResource(R.string.apocrypha_create_list))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { sourceViewModel.dismissApocryphaSuggestion() }) {
+                    Text(stringResource(R.string.action_not_now))
+                }
+            }
+        )
+    }
+
+    if (showTextBibleDialog) {
+        val op = textOpState
+        AlertDialog(
+            onDismissRequest = {
+                if (op !is TextOpState.Running && op !is TextOpState.Progress) {
+                    showTextBibleDialog = false
+                    sourceViewModel.resetTextOpState()
+                }
+            },
+            title = { Text(stringResource(R.string.add_text_bible)) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.text_bible_dialog_desc), style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(12.dp))
+                    when (op) {
+                        is TextOpState.Running -> Text(stringResource(R.string.text_op_preparing), style = MaterialTheme.typography.bodySmall)
+                        is TextOpState.Progress -> Text(
+                            stringResource(R.string.text_op_progress, op.done, op.total),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        is TextOpState.Error -> Text(op.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        TextOpState.Idle -> {
+                            catalog.forEach { entry ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(entry.name, style = MaterialTheme.typography.titleSmall)
+                                        entry.attribution?.let {
+                                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                    TextButton(onClick = { sourceViewModel.downloadTranslation(entry) }) {
+                                        Text(stringResource(R.string.action_download))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { importTextLauncher.launch(arrayOf("application/json", "text/*", "application/xml", "*/*")) },
+                    enabled = op !is TextOpState.Running && op !is TextOpState.Progress
+                ) { Text(stringResource(R.string.action_import_file)) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showTextBibleDialog = false
+                    sourceViewModel.resetTextOpState()
+                }) { Text(stringResource(R.string.action_close)) }
+            }
+        )
     }
 
     Scaffold(
@@ -141,11 +275,11 @@ fun ManageListsScreen(
         if (showResetPickerDialog) {
             AlertDialog(
                 onDismissRequest = { showResetPickerDialog = false },
-                title = { Text("Choose a Preset Plan") },
+                title = { Text(stringResource(R.string.choose_preset_plan)) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            "Select a plan to restore. All current lists and reading progress will be erased.",
+                            stringResource(R.string.preset_picker_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -192,7 +326,7 @@ fun ManageListsScreen(
                 },
                 confirmButton = {},
                 dismissButton = {
-                    TextButton(onClick = { showResetPickerDialog = false }) { Text("Cancel") }
+                    TextButton(onClick = { showResetPickerDialog = false }) { Text(stringResource(R.string.action_cancel)) }
                 }
             )
         }
@@ -201,18 +335,18 @@ fun ManageListsScreen(
         if (showResetConfirmDialog) {
             AlertDialog(
                 onDismissRequest = { showResetConfirmDialog = false },
-                title = { Text("Reset to \"${selectedPreset.displayName}\"?") },
-                text = { Text("This will delete all current lists and reading progress, and restore the \"${selectedPreset.displayName}\" plan. Your audio source mappings will not be deleted. This cannot be undone.") },
+                title = { Text(stringResource(R.string.reset_to_plan, selectedPreset.displayName)) },
+                text = { Text(stringResource(R.string.reset_to_plan_warning, selectedPreset.displayName)) },
                 confirmButton = {
                     TextButton(
                         onClick = {
                             viewModel.resetToDefaults(selectedPreset)
                             showResetConfirmDialog = false
                         }
-                    ) { Text("Reset", color = MaterialTheme.colorScheme.error) }
+                    ) { Text(stringResource(R.string.action_reset), color = MaterialTheme.colorScheme.error) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showResetConfirmDialog = false }) { Text("Cancel") }
+                    TextButton(onClick = { showResetConfirmDialog = false }) { Text(stringResource(R.string.action_cancel)) }
                 }
             )
         }
@@ -229,7 +363,7 @@ fun ManageListsScreen(
             // ----------------------------------------------------------------
             item(key = "sources_title") {
                 Text(
-                    "Audio Sources",
+                    stringResource(R.string.audio_sources),
                     style = MaterialTheme.typography.titleLarge
                 )
                 Spacer(Modifier.height(8.dp))
@@ -244,7 +378,7 @@ fun ManageListsScreen(
                         ) {
                             CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                             Spacer(Modifier.width(12.dp))
-                            Text("Analyzing folder structure…", style = MaterialTheme.typography.bodyMedium)
+                            Text(stringResource(R.string.analyzing_folder), style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
@@ -257,7 +391,7 @@ fun ManageListsScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            "Detection error: ${(detectionState as DetectionState.Error).message}",
+                            stringResource(R.string.detection_error, (detectionState as DetectionState.Error).message),
                             modifier = Modifier.padding(16.dp),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onErrorContainer
@@ -269,8 +403,13 @@ fun ManageListsScreen(
             items(sources, key = { "source_${it.source.sourceId}" }) { swm ->
                 SourceCard(
                     swm          = swm,
+                    isUnavailable = swm.source.sourceId in unavailableSourceIds,
                     onMakeActive = { sourceViewModel.switchSource(swm.source) },
                     onReview     = { onReviewMappings(swm.source.sourceId) },
+                    onRelink     = {
+                        pendingRelinkSourceId = swm.source.sourceId
+                        relinkLauncher.launch(null)
+                    },
                     onDelete     = { sourceViewModel.deleteSource(swm.source) }
                 )
             }
@@ -284,7 +423,7 @@ fun ManageListsScreen(
                     ) {
                         Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Browse Audio")
+                        Text(stringResource(R.string.browse_audio))
                     }
                     OutlinedButton(
                         onClick = { showResetPickerDialog = true },
@@ -292,8 +431,21 @@ fun ManageListsScreen(
                     ) {
                         Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Reset Lists", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.reset_lists), color = MaterialTheme.colorScheme.error)
                     }
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        sourceViewModel.loadCatalog()
+                        showTextBibleDialog = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = detectionState !is DetectionState.Running
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.add_text_bible))
                 }
                 Spacer(Modifier.height(8.dp))
             }
@@ -305,7 +457,7 @@ fun ManageListsScreen(
                 HorizontalDivider()
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "Listening Lists",
+                    stringResource(R.string.listening_lists),
                     style = MaterialTheme.typography.titleLarge
                 )
                 Spacer(Modifier.height(8.dp))
@@ -327,16 +479,16 @@ fun ManageListsScreen(
                                 Icon(Icons.Default.Warning, contentDescription = "Warning",
                                      tint = MaterialTheme.colorScheme.onErrorContainer)
                                 Spacer(Modifier.width(16.dp))
-                                Text("List Configuration Warning", style = MaterialTheme.typography.titleSmall)
+                                Text(stringResource(R.string.list_config_warning), style = MaterialTheme.typography.titleSmall)
                             }
                             if (validationResults.missingBooks.isNotEmpty()) {
                                 Spacer(Modifier.height(8.dp))
-                                Text("Missing Books (${validationResults.missingBooks.size})", style = MaterialTheme.typography.labelMedium)
+                                Text(stringResource(R.string.missing_books_count, validationResults.missingBooks.size), style = MaterialTheme.typography.labelMedium)
                                 Text(validationResults.missingBooks.joinToString(", "), style = MaterialTheme.typography.bodySmall)
                             }
                             if (validationResults.duplicateBooks.isNotEmpty()) {
                                 Spacer(Modifier.height(8.dp))
-                                Text("Duplicate Books (${validationResults.duplicateBooks.size})", style = MaterialTheme.typography.labelMedium)
+                                Text(stringResource(R.string.duplicate_books_count, validationResults.duplicateBooks.size), style = MaterialTheme.typography.labelMedium)
                                 Text(validationResults.duplicateBooks.joinToString(", "), style = MaterialTheme.typography.bodySmall)
                             }
                         }
@@ -430,18 +582,18 @@ fun ManageListsScreen(
     pendingDeleteList?.let { listToDelete ->
         AlertDialog(
             onDismissRequest = { pendingDeleteList = null },
-            title = { Text("Delete \"${listToDelete.listName}\"?") },
-            text = { Text("This will permanently delete the list and all reading progress. This cannot be undone.") },
+            title = { Text(stringResource(R.string.delete_list_title, listToDelete.listName)) },
+            text = { Text(stringResource(R.string.delete_list_warning)) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         viewModel.deleteList(listToDelete)
                         pendingDeleteList = null
                     }
-                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                ) { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDeleteList = null }) { Text("Cancel") }
+                TextButton(onClick = { pendingDeleteList = null }) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }
@@ -457,7 +609,7 @@ fun ManageListsScreen(
             Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     TopAppBar(
-                        title = { Text(if (editingList?.listId == 0L) "Create New List" else "Edit List") },
+                        title = { Text(if (editingList?.listId == 0L) stringResource(R.string.create_new_list) else stringResource(R.string.edit_list)) },
                         navigationIcon = {
                             IconButton(onClick = { showListDialog = false }) {
                                 Icon(Icons.Default.Close, contentDescription = "Close")
@@ -482,7 +634,7 @@ fun ManageListsScreen(
                                     }
                                 },
                                 enabled = listNameInput.isNotBlank() && selectedBooks.isNotEmpty()
-                            ) { Text("Save") }
+                            ) { Text(stringResource(R.string.action_save)) }
                         }
                     )
                     Column(
@@ -492,13 +644,13 @@ fun ManageListsScreen(
                         OutlinedTextField(
                             value = listNameInput,
                             onValueChange = { listNameInput = it },
-                            label = { Text("List Name") },
+                            label = { Text(stringResource(R.string.list_name)) },
                             modifier = Modifier.fillMaxWidth()
                         )
 
                         // Color picker
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("List Color", style = MaterialTheme.typography.titleSmall)
+                            Text(stringResource(R.string.list_color), style = MaterialTheme.typography.titleSmall)
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 item {
                                     Box(
@@ -546,27 +698,75 @@ fun ManageListsScreen(
                             }
                         }
 
-                        Text("Selected Books", style = MaterialTheme.typography.titleSmall)
+                        Text(stringResource(R.string.selected_books_hint), style = MaterialTheme.typography.titleSmall)
                         if (selectedBooks.isEmpty()) {
                             Text(
-                                "No books selected",
+                                stringResource(R.string.no_books_selected),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         } else {
+                            // #23: Drag-to-reorder. The list reorders once on drop (no mid-drag
+                            // mutation), so it's robust; the arrow buttons remain as a fallback.
+                            var draggingIndex by remember { mutableStateOf<Int?>(null) }
+                            var dragOffsetY by remember { mutableStateOf(0f) }
+                            var itemHeightPx by remember { mutableStateOf(1) }
+                            val spacingPx = with(LocalDensity.current) { 8.dp.toPx() }
+
                             LazyColumn(
                                 modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 itemsIndexed(selectedBooks, key = { _, book -> "selected_$book" }) { idx, book ->
+                                    val isDragging = idx == draggingIndex
                                     Card(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .onSizeChanged { if (it.height > 0) itemHeightPx = it.height }
+                                            .zIndex(if (isDragging) 1f else 0f)
+                                            .graphicsLayer { translationY = if (isDragging) dragOffsetY else 0f },
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (isDragging)
+                                                MaterialTheme.colorScheme.secondaryContainer
+                                            else
+                                                MaterialTheme.colorScheme.surfaceVariant
+                                        )
                                     ) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
+                                            Icon(
+                                                Icons.Default.DragHandle,
+                                                contentDescription = "Drag to reorder",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.pointerInput(book, selectedBooks.size) {
+                                                    detectDragGesturesAfterLongPress(
+                                                        onDragStart = { draggingIndex = idx; dragOffsetY = 0f },
+                                                        onDrag = { change, amount ->
+                                                            change.consume()
+                                                            dragOffsetY += amount.y
+                                                        },
+                                                        onDragEnd = {
+                                                            val step = itemHeightPx + spacingPx
+                                                            val delta = if (step > 0f) (dragOffsetY / step).roundToInt() else 0
+                                                            val target = (idx + delta).coerceIn(0, selectedBooks.size - 1)
+                                                            if (target != idx) {
+                                                                val m = selectedBooks.toMutableList()
+                                                                m.add(target, m.removeAt(idx))
+                                                                selectedBooks = m
+                                                            }
+                                                            draggingIndex = null
+                                                            dragOffsetY = 0f
+                                                        },
+                                                        onDragCancel = {
+                                                            draggingIndex = null
+                                                            dragOffsetY = 0f
+                                                        }
+                                                    )
+                                                }
+                                            )
+                                            Spacer(Modifier.width(4.dp))
                                             Text(book, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                                             IconButton(
                                                 onClick = {
@@ -603,11 +803,22 @@ fun ManageListsScreen(
                             }
                         }
                         HorizontalDivider()
-                        Text("Available Books (Tap to add)", style = MaterialTheme.typography.titleSmall)
-                        val available = BibleRegistry.getAllBooks().filter { it !in selectedBooks }
+                        Text(stringResource(R.string.available_books_hint), style = MaterialTheme.typography.titleSmall)
+                        var bookSearch by remember { mutableStateOf("") }
+                        OutlinedTextField(
+                            value = bookSearch,
+                            onValueChange = { bookSearch = it },
+                            label = { Text(stringResource(R.string.search_books)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        val query = bookSearch.trim()
+                        val available = BibleRegistry.getAllBooks()
+                            .filter { it !in selectedBooks && it.contains(query, ignoreCase = true) }
                         if (available.isEmpty()) {
                             Text(
-                                "All books have been added to this list.",
+                                if (query.isEmpty()) stringResource(R.string.all_books_added)
+                                else stringResource(R.string.no_books_match, query),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -647,53 +858,81 @@ fun ManageListsScreen(
 @Composable
 private fun SourceCard(
     swm: com.Bible3650.www.data.local.SourceWithMappings,
+    isUnavailable: Boolean,
     onMakeActive: () -> Unit,
     onReview: () -> Unit,
+    onRelink: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val isText = swm.source.sourceType == "TEXT"
     val mapped = swm.mappings.size
     val total  = BibleRegistry.getAllBooks().size
     val allMapped = mapped == total
+    val ok = if (isText) !isUnavailable else (allMapped && !isUnavailable)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (swm.source.isActive)
-                MaterialTheme.colorScheme.primaryContainer
-            else
-                MaterialTheme.colorScheme.surfaceVariant
+            containerColor = when {
+                isUnavailable      -> MaterialTheme.colorScheme.errorContainer
+                swm.source.isActive -> MaterialTheme.colorScheme.primaryContainer
+                else               -> MaterialTheme.colorScheme.surfaceVariant
+            }
         )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = if (allMapped) Icons.Filled.CheckCircle else Icons.Default.Warning,
+                    imageVector = if (ok) Icons.Filled.CheckCircle else Icons.Default.Warning,
                     contentDescription = null,
-                    tint = if (allMapped) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    tint = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(swm.source.displayName, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "$mapped / $total books linked",
+                        if (isText) stringResource(R.string.text_source_subtitle)
+                        else stringResource(R.string.books_linked, mapped, total),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                if (isText) {
+                    Badge { Text(stringResource(R.string.badge_text)) }
+                    Spacer(Modifier.width(4.dp))
+                }
                 if (swm.source.isActive) {
-                    Badge { Text("Active") }
+                    Badge { Text(stringResource(R.string.active)) }
                 }
             }
+
+            if (isUnavailable) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.source_unavailable),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onReview, modifier = Modifier.weight(1f)) {
-                    Text("Review")
-                }
-                if (!swm.source.isActive) {
-                    Button(onClick = onMakeActive, modifier = Modifier.weight(1f)) {
-                        Text("Use")
+                if (isUnavailable) {
+                    Button(onClick = onRelink, modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.action_relink))
+                    }
+                } else {
+                    if (!isText) {
+                        OutlinedButton(onClick = onReview, modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.action_review))
+                        }
+                    }
+                    if (!swm.source.isActive) {
+                        Button(onClick = onMakeActive, modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.action_use))
+                        }
                     }
                 }
                 IconButton(onClick = onDelete) {

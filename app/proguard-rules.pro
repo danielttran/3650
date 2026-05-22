@@ -17,8 +17,9 @@
 }
 
 # ---------------------------------------------------------------------------
-# Gson: keep data classes used for backup serialization so field names are not
-# renamed by R8 and JSON import/export continues to work after minification.
+# Backup serialization (kotlinx.serialization): keep the backup data classes used
+# for JSON import/export. The kotlinx-serialization runtime ships its own consumer
+# rules to retain the generated serializers; these keeps guard the model classes.
 # ---------------------------------------------------------------------------
 -keep class com.Bible3650.www.data.ProgressBackup { *; }
 -keep class com.Bible3650.www.data.ReadingListBackup { *; }

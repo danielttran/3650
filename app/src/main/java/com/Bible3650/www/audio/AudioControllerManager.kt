@@ -21,10 +21,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import android.net.Uri
 import androidx.core.net.toUri
 import javax.inject.Inject
@@ -36,14 +38,28 @@ import com.Bible3650.www.di.IoDispatcher
 private const val PREFS_NAME = "audio_playback_state"
 private const val KEY_MEDIA_ID = "last_media_id"
 private const val KEY_POSITION = "last_position_ms"
+private const val KEY_SPEED = "playback_speed"
+
+const val MIN_PLAYBACK_SPEED = 0.5f
+const val MAX_PLAYBACK_SPEED = 3.0f
 
 // Separator in uniqueId format "listId_dayOffset_book_chapter"; listId is the first segment.
 private const val TASK_ID_SEPARATOR = "_"
+
+/** State of the optional sleep timer that auto-pauses playback. */
+sealed interface SleepTimer {
+    object Off : SleepTimer
+    /** Pause when the currently playing chapter finishes. */
+    object EndOfChapter : SleepTimer
+    /** Pause at [endElapsedRealtimeMs] (SystemClock.elapsedRealtime base). */
+    data class Timed(val endElapsedRealtimeMs: Long) : SleepTimer
+}
 
 @Singleton
 class AudioControllerManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: BibleRepository,
+    private val ttsSynthesizer: TtsSynthesizer,
     @MainDispatcher private val mainDispatcher: CoroutineDispatcher,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -63,9 +79,22 @@ class AudioControllerManager @Inject constructor(
     private val _duration = MutableStateFlow(0L)
     val duration: StateFlow<Long> = _duration
 
+    private val _playbackSpeed = MutableStateFlow(1.0f)
+    val playbackSpeed: StateFlow<Float> = _playbackSpeed
+
+    private val _sleepTimer = MutableStateFlow<SleepTimer>(SleepTimer.Off)
+    val sleepTimer: StateFlow<SleepTimer> = _sleepTimer
+    private var sleepTimerJob: Job? = null
+    // Bumped on every sleep-timer change so a previously-scheduled countdown that has
+    // already passed its delay cannot clobber a newer timer's state.
+    private var sleepTimerGeneration = 0
+
     // #13: Expose playback errors (e.g. unresolvable audio URI) so the UI can show a snackbar.
     private val _playerError = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val playerError: SharedFlow<String> = _playerError.asSharedFlow()
+
+    /** True while a text chapter is being rendered to audio (TTS sources). */
+    val isSynthesizing: StateFlow<Boolean> = ttsSynthesizer.isSynthesizing
 
     // #10: Singleton scope — never cancelled. release() only tears down the MediaController,
     // not the scope itself, so coroutines launched after reconnect work correctly.
@@ -78,6 +107,8 @@ class AudioControllerManager @Inject constructor(
     val savedPosition: Long get() = prefs.getLong(KEY_POSITION, 0L)
 
     init {
+        _playbackSpeed.value = prefs.getFloat(KEY_SPEED, 1.0f)
+            .coerceIn(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED)
         initializeController()
     }
 
@@ -125,6 +156,8 @@ class AudioControllerManager @Inject constructor(
             }
 
             _player.value = mediaController
+            // Re-apply the persisted playback speed across reconnect cycles.
+            mediaController.setPlaybackSpeed(_playbackSpeed.value)
 
             mediaController.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -169,6 +202,11 @@ class AudioControllerManager @Inject constructor(
                                     }
                                 }
                             }
+                        // Sleep timer: stop once the chapter that was playing has finished.
+                        if (_sleepTimer.value is SleepTimer.EndOfChapter) {
+                            mediaController.pause()
+                            _sleepTimer.value = SleepTimer.Off
+                        }
                     }
                 }
 
@@ -190,6 +228,10 @@ class AudioControllerManager @Inject constructor(
                                 }
                             }
                         prefs.edit().remove(KEY_MEDIA_ID).remove(KEY_POSITION).apply()
+                        // Playback finished; disarm an end-of-chapter sleep timer.
+                        if (_sleepTimer.value is SleepTimer.EndOfChapter) {
+                            _sleepTimer.value = SleepTimer.Off
+                        }
                     }
                 }
 
@@ -218,7 +260,8 @@ class AudioControllerManager @Inject constructor(
         tasks: List<DailyTask>,
         startIndex: Int = 0,
         startPositionMs: Long = androidx.media3.common.C.TIME_UNSET,
-        playWhenReady: Boolean = true
+        playWhenReady: Boolean = true,
+        forceReload: Boolean = false
     ) {
         android.util.Log.d("AudioController", "playTasks: tasks=${tasks.size}, startIndex=$startIndex")
         val safeStartIndex = computeSafeStartIndex(tasks.size, startIndex)
@@ -229,8 +272,9 @@ class AudioControllerManager @Inject constructor(
             return
         }
 
-        // Check if the current playlist already matches `tasks`
-        if (tasks.isNotEmpty() && player.mediaItemCount == tasks.size) {
+        // Check if the current playlist already matches `tasks`. Skipped on forceReload so a
+        // source/translation switch re-resolves URIs even though the uniqueIds are unchanged.
+        if (!forceReload && tasks.isNotEmpty() && player.mediaItemCount == tasks.size) {
             var isMatch = true
             for (i in tasks.indices) {
                 if (player.getMediaItemAt(i).mediaId != tasks[i].uniqueId) {
@@ -253,9 +297,14 @@ class AudioControllerManager @Inject constructor(
 
         scope.launch(ioDispatcher) {
             try {
+                val activeSource = repository.audioSourceDao.getActiveSource()
+                if (activeSource?.sourceType == "TEXT") {
+                    playTextTasks(tasks, safeStartIndex, startPositionMs, playWhenReady, requestId, activeSource.translationId)
+                    return@launch
+                }
+
                 val activeMappings = repository.audioSourceDao.observeActiveMappings().firstOrNull() ?: emptyList()
                 val mappingsByBook = activeMappings.associateBy { it.bookName }
-                val activeSource   = repository.audioSourceDao.getActiveSource()
 
                 suspend fun resolveUri(task: DailyTask): Uri? {
                     val mapping = mappingsByBook[task.targetBook] ?: return null
@@ -267,15 +316,7 @@ class AudioControllerManager @Inject constructor(
                 // Resolve all URIs up front (single atomic playlist set, no seek race)
                 val allMediaItems = tasks.map { task ->
                     val uri = resolveUri(task)
-                    MediaItem.Builder()
-                        .setMediaId(task.uniqueId)
-                        .setUri(uri)
-                        .setRequestMetadata(
-                            MediaItem.RequestMetadata.Builder()
-                                .setMediaUri(uri)
-                                .build()
-                        )
-                        .build()
+                    buildMediaItem(task, uri)
                 }
 
                 // #13: Warn if the start item has no resolvable URI, and also report
@@ -306,6 +347,85 @@ class AudioControllerManager @Inject constructor(
         }
     }
 
+    private fun buildMediaItem(task: DailyTask, uri: Uri?): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(task.uniqueId)
+            .setUri(uri)
+            .setRequestMetadata(MediaItem.RequestMetadata.Builder().setMediaUri(uri).build())
+            .build()
+
+    // TEXT (TTS) playback: synthesize the start chapter synchronously so playback can begin,
+    // set the playlist (other items start URI-less), then prefetch the remaining chapters in
+    // play order and swap them in via replaceMediaItem before they're reached.
+    private suspend fun playTextTasks(
+        tasks: List<DailyTask>,
+        safeStartIndex: Int,
+        startPositionMs: Long,
+        playWhenReady: Boolean,
+        requestId: Long,
+        translationId: Long?
+    ) {
+        val player = _player.value ?: return
+        val startTask = tasks.getOrNull(safeStartIndex)
+        val startUri = startTask?.let { ttsSynthesizer.synthesizeChapter(translationId, it.targetBook, it.targetChapter) }
+        if (startUri == null) {
+            _playerError.tryEmit("Couldn't read this chapter aloud. Check the text source.")
+        }
+
+        val mediaItems = tasks.mapIndexed { i, task ->
+            buildMediaItem(task, if (i == safeStartIndex) startUri else null)
+        }
+        withContext(mainDispatcher) {
+            if (requestId != currentPlaylistRequestId) return@withContext
+            val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs
+                           else androidx.media3.common.C.TIME_UNSET
+            player.setMediaItems(mediaItems, safeStartIndex, startPos)
+            player.prepare()
+            if (playWhenReady) player.play() else player.pause()
+        }
+
+        // Prefetch the rest in play order (after the start, then wrap to the beginning).
+        val order = (safeStartIndex + 1 until tasks.size) + (0 until safeStartIndex)
+        for (i in order) {
+            if (requestId != currentPlaylistRequestId) return
+            val task = tasks[i]
+            val uri = ttsSynthesizer.synthesizeChapter(translationId, task.targetBook, task.targetChapter) ?: continue
+            withContext(mainDispatcher) {
+                if (requestId != currentPlaylistRequestId) return@withContext
+                if (i < player.mediaItemCount && player.getMediaItemAt(i).mediaId == task.uniqueId) {
+                    player.replaceMediaItem(i, buildMediaItem(task, uri))
+                }
+            }
+        }
+    }
+
+    /** Snapshot of the live player, used to resume the same chapter after a source switch. */
+    data class PlaybackSnapshot(val mediaId: String, val positionMs: Long, val wasPlaying: Boolean)
+
+    fun currentPlaybackSnapshot(): PlaybackSnapshot? {
+        val p = _player.value ?: return null
+        val id = p.currentMediaItem?.mediaId ?: return null
+        return PlaybackSnapshot(id, p.currentPosition.coerceAtLeast(0L), p.isPlaying)
+    }
+
+    /**
+     * Re-points the player at the same book+chapter on the now-active source so a
+     * source/translation switch never loses the user's place. [resetPosition] starts the
+     * chapter from 0 (used when switching across types, e.g. audio↔text, where durations
+     * differ); otherwise the prior position is reused (clamped by the player).
+     */
+    fun resumeFromSnapshot(snapshot: PlaybackSnapshot, resetPosition: Boolean) {
+        scope.launch {
+            val tasks = withTimeoutOrNull(5_000) {
+                repository.dailyTasksFlow.first { list -> list.any { it.uniqueId == snapshot.mediaId } }
+            } ?: return@launch
+            val index = tasks.indexOfFirst { it.uniqueId == snapshot.mediaId }
+            if (index == -1) return@launch
+            val pos = if (resetPosition) 0L else snapshot.positionMs
+            playTasks(tasks, index, pos, playWhenReady = snapshot.wasPlaying, forceReload = true)
+        }
+    }
+
     fun togglePlayPause() {
         val player = _player.value ?: return
         if (player.playbackState == Player.STATE_ENDED) {
@@ -322,11 +442,80 @@ class AudioControllerManager @Inject constructor(
         _player.value?.seekToNext()
     }
 
+    fun skipToPrevious() {
+        _player.value?.seekToPrevious()
+    }
+
+    /** Rewind within the current chapter by the configured increment (15s). */
+    fun rewind() {
+        _player.value?.seekBack()
+    }
+
+    /** Fast-forward within the current chapter by the configured increment (15s). */
+    fun fastForward() {
+        _player.value?.seekForward()
+    }
+
+    /** Seek to an absolute position (ms) within the current chapter. */
+    fun seekTo(positionMs: Long) {
+        val player = _player.value ?: return
+        player.seekTo(positionMs.coerceAtLeast(0L))
+        _currentPosition.value = positionMs.coerceAtLeast(0L)
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        val clamped = speed.coerceIn(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED)
+        _playbackSpeed.value = clamped
+        _player.value?.setPlaybackSpeed(clamped)
+        prefs.edit().putFloat(KEY_SPEED, clamped).apply()
+    }
+
+    // Cancels any running countdown and advances the generation; returns the new generation.
+    private fun beginSleepTimerChange(): Int {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        return ++sleepTimerGeneration
+    }
+
+    /** Arm a countdown sleep timer; [minutes] <= 0 cancels it. */
+    fun setSleepTimerMinutes(minutes: Int) {
+        beginSleepTimerChange()
+        if (minutes <= 0) {
+            _sleepTimer.value = SleepTimer.Off
+            return
+        }
+        val gen = sleepTimerGeneration
+        val end = android.os.SystemClock.elapsedRealtime() + minutes * 60_000L
+        _sleepTimer.value = SleepTimer.Timed(end)
+        sleepTimerJob = scope.launch {
+            val remaining = end - android.os.SystemClock.elapsedRealtime()
+            if (remaining > 0) delay(remaining)
+            if (gen != sleepTimerGeneration) return@launch  // superseded by a newer change
+            _player.value?.pause()
+            _sleepTimer.value = SleepTimer.Off
+        }
+    }
+
+    /** Pause automatically once the current chapter finishes. */
+    fun setSleepTimerEndOfChapter() {
+        beginSleepTimerChange()
+        _sleepTimer.value = SleepTimer.EndOfChapter
+    }
+
+    fun cancelSleepTimer() {
+        beginSleepTimerChange()
+        _sleepTimer.value = SleepTimer.Off
+    }
+
     // #10: Do NOT cancel the singleton scope here. The scope must survive across
     // release/reconnect cycles. Only tear down the controller and position job.
     fun release() {
         positionUpdateJob?.cancel()
         positionUpdateJob = null
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        sleepTimerGeneration++
+        _sleepTimer.value = SleepTimer.Off
         _isPlaying.value = false
         // Clear playback state so the UI doesn't show stale "Now Playing" after
         // the service is destroyed and before a new controller connects.
