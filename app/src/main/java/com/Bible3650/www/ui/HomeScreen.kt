@@ -54,7 +54,7 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "Go to Lists → Audio Sources and browse to a folder containing your audio Bible files.",
+                        stringResource(R.string.msg_no_audio_source_hint),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -107,8 +107,8 @@ fun HomeScreen(
                                 Icon(Icons.Default.PlayArrow, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    if (canResume) "Resume — ${playingTask!!.subtitle}"
-                                    else "Play all lists"
+                                    if (canResume) stringResource(R.string.resume_with_chapter, playingTask!!.subtitle)
+                                    else stringResource(R.string.play_all_lists)
                                 )
                             }
                         }
@@ -356,7 +356,7 @@ fun ListEntryItem(
                         if (isPlaying) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                "Now Playing",
+                                stringResource(R.string.now_playing),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = titleColor,
                                 fontWeight = FontWeight.Bold
@@ -432,7 +432,7 @@ private fun JumpToChapterDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Jump to chapter") },
+        title = { Text(stringResource(R.string.jump_to_chapter)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
@@ -462,7 +462,7 @@ private fun JumpToChapterDialog(
                 OutlinedTextField(
                     value = chapterText,
                     onValueChange = { chapterText = it.filter { c -> c.isDigit() }.take(3) },
-                    label = { Text("Chapter (1–$maxChapter)") },
+                    label = { Text(stringResource(R.string.chapter_range, maxChapter)) },
                     singleLine = true,
                     isError = chapterText.isNotEmpty() && !valid,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -471,11 +471,11 @@ private fun JumpToChapterDialog(
         },
         confirmButton = {
             TextButton(enabled = valid, onClick = { onJump(selectedBook, parsedChapter ?: 1) }) {
-                Text("Jump")
+                Text(stringResource(R.string.action_jump))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         }
     )
 }

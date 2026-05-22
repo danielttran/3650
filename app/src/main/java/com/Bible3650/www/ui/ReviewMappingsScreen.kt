@@ -186,7 +186,7 @@ fun ReviewMappingsScreen(
                             maxLines = 1
                         )
                         Text(
-                            "${state.mappedCount} / ${state.rows.size} books mapped",
+                            stringResource(R.string.books_mapped, state.mappedCount, state.rows.size),
                             style = MaterialTheme.typography.bodySmall,
                             color = if (state.allMapped) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.error
@@ -225,8 +225,7 @@ fun ReviewMappingsScreen(
                                  tint = MaterialTheme.colorScheme.onErrorContainer)
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                "${state.rows.size - state.mappedCount} book(s) not yet linked. " +
-                                "Tap the folder icon next to a book to manually select its folder.",
+                                stringResource(R.string.books_not_linked_hint, state.rows.size - state.mappedCount),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onErrorContainer
                             )
@@ -286,12 +285,12 @@ private fun MappingRow(row: MappingRowUi, isCounting: Boolean, onPickFolder: () 
                      style = MaterialTheme.typography.bodyMedium)
                 if (row.isMapped) {
                     Text(
-                        "${row.fileCount} files · confidence ${(row.confidence * 100).toInt()}%",
+                        stringResource(R.string.file_count_confidence, row.fileCount, (row.confidence * 100).toInt()),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    Text("Not linked — tap to pick folder",
+                    Text(stringResource(R.string.not_linked_tap),
                          style = MaterialTheme.typography.bodySmall,
                          color = MaterialTheme.colorScheme.error)
                 }

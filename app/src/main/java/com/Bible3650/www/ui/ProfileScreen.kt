@@ -49,9 +49,9 @@ fun ProfileScreen(
                             stream.write(json.toByteArray())
                         }
                     }
-                    snackbarHostState.showSnackbar("Progress exported successfully")
+                    snackbarHostState.showSnackbar(context.getString(R.string.progress_exported))
                 } catch (e: Exception) {
-                    snackbarHostState.showSnackbar("Export failed")
+                    snackbarHostState.showSnackbar(context.getString(R.string.export_failed))
                 }
             }
         }
@@ -75,10 +75,10 @@ fun ProfileScreen(
                         pendingImportJson = json
                         showImportConfirm = true
                     } else {
-                        snackbarHostState.showSnackbar("Failed to read backup file (file may be too large or unreadable)")
+                        snackbarHostState.showSnackbar(context.getString(R.string.backup_read_failed_large))
                     }
                 } catch (e: Exception) {
-                    snackbarHostState.showSnackbar("Failed to read backup file")
+                    snackbarHostState.showSnackbar(context.getString(R.string.backup_read_failed))
                 }
             }
         }
@@ -109,7 +109,7 @@ fun ProfileScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "Total Chapters",
+                        text = stringResource(R.string.total_chapters),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
@@ -128,7 +128,7 @@ fun ProfileScreen(
                         ),
                         modifier = Modifier.padding(top = 8.dp)
                     ) {
-                        Text("Reset Total Stats")
+                        Text(stringResource(R.string.reset_total_stats))
                     }
 
                     Row(
@@ -136,7 +136,7 @@ fun ProfileScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedButton(onClick = { exportLauncher.launch("bible3650_backup.json") }) {
-                            Text("Export Progress")
+                            Text(stringResource(R.string.export_progress))
                         }
                         OutlinedButton(onClick = {
                             importLauncher.launch(
@@ -146,14 +146,14 @@ fun ProfileScreen(
                                 )
                             )
                         }) {
-                            Text("Import Progress")
+                            Text(stringResource(R.string.import_progress))
                         }
                     }
                 }
             }
 
             Text(
-                text = "Books Completed Stats",
+                text = stringResource(R.string.books_completed_stats),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
@@ -209,8 +209,8 @@ fun ProfileScreen(
     if (showImportConfirm) {
         AlertDialog(
             onDismissRequest = { showImportConfirm = false },
-            title = { Text("Restore Progress?") },
-            text = { Text("This will overwrite your current Listening Lists and all statistics. This action cannot be undone.\n\nNote: audio folder access does not transfer between devices, so after restoring on a new device you may need to re-link your audio source under Lists → Audio Sources.") },
+            title = { Text(stringResource(R.string.restore_progress_q)) },
+            text = { Text(stringResource(R.string.restore_progress_warning)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -219,18 +219,18 @@ fun ProfileScreen(
                             scope.launch {
                                 val success = viewModel.importData(json)
                                 if (success) {
-                                    snackbarHostState.showSnackbar("Progress restored successfully")
+                                    snackbarHostState.showSnackbar(context.getString(R.string.progress_restored))
                                 } else {
-                                    snackbarHostState.showSnackbar("Error: Invalid backup file")
+                                    snackbarHostState.showSnackbar(context.getString(R.string.restore_invalid))
                                 }
                             }
                         }
                         showImportConfirm = false
                     }
-                ) { Text("Restore", color = MaterialTheme.colorScheme.error) }
+                ) { Text(stringResource(R.string.action_restore), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { showImportConfirm = false }) { Text("Cancel") }
+                TextButton(onClick = { showImportConfirm = false }) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }

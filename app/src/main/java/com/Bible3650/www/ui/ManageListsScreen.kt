@@ -37,6 +37,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -173,11 +174,11 @@ fun ManageListsScreen(
         if (showResetPickerDialog) {
             AlertDialog(
                 onDismissRequest = { showResetPickerDialog = false },
-                title = { Text("Choose a Preset Plan") },
+                title = { Text(stringResource(R.string.choose_preset_plan)) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            "Select a plan to restore. All current lists and reading progress will be erased.",
+                            stringResource(R.string.preset_picker_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -224,7 +225,7 @@ fun ManageListsScreen(
                 },
                 confirmButton = {},
                 dismissButton = {
-                    TextButton(onClick = { showResetPickerDialog = false }) { Text("Cancel") }
+                    TextButton(onClick = { showResetPickerDialog = false }) { Text(stringResource(R.string.action_cancel)) }
                 }
             )
         }
@@ -233,18 +234,18 @@ fun ManageListsScreen(
         if (showResetConfirmDialog) {
             AlertDialog(
                 onDismissRequest = { showResetConfirmDialog = false },
-                title = { Text("Reset to \"${selectedPreset.displayName}\"?") },
-                text = { Text("This will delete all current lists and reading progress, and restore the \"${selectedPreset.displayName}\" plan. Your audio source mappings will not be deleted. This cannot be undone.") },
+                title = { Text(stringResource(R.string.reset_to_plan, selectedPreset.displayName)) },
+                text = { Text(stringResource(R.string.reset_to_plan_warning, selectedPreset.displayName)) },
                 confirmButton = {
                     TextButton(
                         onClick = {
                             viewModel.resetToDefaults(selectedPreset)
                             showResetConfirmDialog = false
                         }
-                    ) { Text("Reset", color = MaterialTheme.colorScheme.error) }
+                    ) { Text(stringResource(R.string.action_reset), color = MaterialTheme.colorScheme.error) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showResetConfirmDialog = false }) { Text("Cancel") }
+                    TextButton(onClick = { showResetConfirmDialog = false }) { Text(stringResource(R.string.action_cancel)) }
                 }
             )
         }
@@ -261,7 +262,7 @@ fun ManageListsScreen(
             // ----------------------------------------------------------------
             item(key = "sources_title") {
                 Text(
-                    "Audio Sources",
+                    stringResource(R.string.audio_sources),
                     style = MaterialTheme.typography.titleLarge
                 )
                 Spacer(Modifier.height(8.dp))
@@ -276,7 +277,7 @@ fun ManageListsScreen(
                         ) {
                             CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                             Spacer(Modifier.width(12.dp))
-                            Text("Analyzing folder structure…", style = MaterialTheme.typography.bodyMedium)
+                            Text(stringResource(R.string.analyzing_folder), style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
@@ -289,7 +290,7 @@ fun ManageListsScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            "Detection error: ${(detectionState as DetectionState.Error).message}",
+                            stringResource(R.string.detection_error, (detectionState as DetectionState.Error).message),
                             modifier = Modifier.padding(16.dp),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onErrorContainer
@@ -321,7 +322,7 @@ fun ManageListsScreen(
                     ) {
                         Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Browse Audio")
+                        Text(stringResource(R.string.browse_audio))
                     }
                     OutlinedButton(
                         onClick = { showResetPickerDialog = true },
@@ -329,7 +330,7 @@ fun ManageListsScreen(
                     ) {
                         Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Reset Lists", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.reset_lists), color = MaterialTheme.colorScheme.error)
                     }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -342,7 +343,7 @@ fun ManageListsScreen(
                 HorizontalDivider()
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "Listening Lists",
+                    stringResource(R.string.listening_lists),
                     style = MaterialTheme.typography.titleLarge
                 )
                 Spacer(Modifier.height(8.dp))
@@ -364,16 +365,16 @@ fun ManageListsScreen(
                                 Icon(Icons.Default.Warning, contentDescription = "Warning",
                                      tint = MaterialTheme.colorScheme.onErrorContainer)
                                 Spacer(Modifier.width(16.dp))
-                                Text("List Configuration Warning", style = MaterialTheme.typography.titleSmall)
+                                Text(stringResource(R.string.list_config_warning), style = MaterialTheme.typography.titleSmall)
                             }
                             if (validationResults.missingBooks.isNotEmpty()) {
                                 Spacer(Modifier.height(8.dp))
-                                Text("Missing Books (${validationResults.missingBooks.size})", style = MaterialTheme.typography.labelMedium)
+                                Text(stringResource(R.string.missing_books_count, validationResults.missingBooks.size), style = MaterialTheme.typography.labelMedium)
                                 Text(validationResults.missingBooks.joinToString(", "), style = MaterialTheme.typography.bodySmall)
                             }
                             if (validationResults.duplicateBooks.isNotEmpty()) {
                                 Spacer(Modifier.height(8.dp))
-                                Text("Duplicate Books (${validationResults.duplicateBooks.size})", style = MaterialTheme.typography.labelMedium)
+                                Text(stringResource(R.string.duplicate_books_count, validationResults.duplicateBooks.size), style = MaterialTheme.typography.labelMedium)
                                 Text(validationResults.duplicateBooks.joinToString(", "), style = MaterialTheme.typography.bodySmall)
                             }
                         }
@@ -467,18 +468,18 @@ fun ManageListsScreen(
     pendingDeleteList?.let { listToDelete ->
         AlertDialog(
             onDismissRequest = { pendingDeleteList = null },
-            title = { Text("Delete \"${listToDelete.listName}\"?") },
-            text = { Text("This will permanently delete the list and all reading progress. This cannot be undone.") },
+            title = { Text(stringResource(R.string.delete_list_title, listToDelete.listName)) },
+            text = { Text(stringResource(R.string.delete_list_warning)) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         viewModel.deleteList(listToDelete)
                         pendingDeleteList = null
                     }
-                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                ) { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDeleteList = null }) { Text("Cancel") }
+                TextButton(onClick = { pendingDeleteList = null }) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }
@@ -494,7 +495,7 @@ fun ManageListsScreen(
             Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     TopAppBar(
-                        title = { Text(if (editingList?.listId == 0L) "Create New List" else "Edit List") },
+                        title = { Text(if (editingList?.listId == 0L) stringResource(R.string.create_new_list) else stringResource(R.string.edit_list)) },
                         navigationIcon = {
                             IconButton(onClick = { showListDialog = false }) {
                                 Icon(Icons.Default.Close, contentDescription = "Close")
@@ -519,7 +520,7 @@ fun ManageListsScreen(
                                     }
                                 },
                                 enabled = listNameInput.isNotBlank() && selectedBooks.isNotEmpty()
-                            ) { Text("Save") }
+                            ) { Text(stringResource(R.string.action_save)) }
                         }
                     )
                     Column(
@@ -529,13 +530,13 @@ fun ManageListsScreen(
                         OutlinedTextField(
                             value = listNameInput,
                             onValueChange = { listNameInput = it },
-                            label = { Text("List Name") },
+                            label = { Text(stringResource(R.string.list_name)) },
                             modifier = Modifier.fillMaxWidth()
                         )
 
                         // Color picker
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("List Color", style = MaterialTheme.typography.titleSmall)
+                            Text(stringResource(R.string.list_color), style = MaterialTheme.typography.titleSmall)
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 item {
                                     Box(
@@ -583,10 +584,10 @@ fun ManageListsScreen(
                             }
                         }
 
-                        Text("Selected Books (long-press the handle to drag)", style = MaterialTheme.typography.titleSmall)
+                        Text(stringResource(R.string.selected_books_hint), style = MaterialTheme.typography.titleSmall)
                         if (selectedBooks.isEmpty()) {
                             Text(
-                                "No books selected",
+                                stringResource(R.string.no_books_selected),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -688,12 +689,12 @@ fun ManageListsScreen(
                             }
                         }
                         HorizontalDivider()
-                        Text("Available Books (Tap to add)", style = MaterialTheme.typography.titleSmall)
+                        Text(stringResource(R.string.available_books_hint), style = MaterialTheme.typography.titleSmall)
                         var bookSearch by remember { mutableStateOf("") }
                         OutlinedTextField(
                             value = bookSearch,
                             onValueChange = { bookSearch = it },
-                            label = { Text("Search books") },
+                            label = { Text(stringResource(R.string.search_books)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -702,8 +703,8 @@ fun ManageListsScreen(
                             .filter { it !in selectedBooks && it.contains(query, ignoreCase = true) }
                         if (available.isEmpty()) {
                             Text(
-                                if (query.isEmpty()) "All books have been added to this list."
-                                else "No books match \"$query\".",
+                                if (query.isEmpty()) stringResource(R.string.all_books_added)
+                                else stringResource(R.string.no_books_match, query),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -776,20 +777,20 @@ private fun SourceCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(swm.source.displayName, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "$mapped / $total books linked",
+                        stringResource(R.string.books_linked, mapped, total),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 if (swm.source.isActive) {
-                    Badge { Text("Active") }
+                    Badge { Text(stringResource(R.string.active)) }
                 }
             }
 
             if (isUnavailable) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "This folder is no longer accessible — it may have been moved, deleted, or its permission revoked. Re-link it to restore playback.",
+                    stringResource(R.string.source_unavailable),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onErrorContainer
                 )
@@ -799,15 +800,15 @@ private fun SourceCard(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (isUnavailable) {
                     Button(onClick = onRelink, modifier = Modifier.weight(1f)) {
-                        Text("Re-link")
+                        Text(stringResource(R.string.action_relink))
                     }
                 } else {
                     OutlinedButton(onClick = onReview, modifier = Modifier.weight(1f)) {
-                        Text("Review")
+                        Text(stringResource(R.string.action_review))
                     }
                     if (!swm.source.isActive) {
                         Button(onClick = onMakeActive, modifier = Modifier.weight(1f)) {
-                            Text("Use")
+                            Text(stringResource(R.string.action_use))
                         }
                     }
                 }

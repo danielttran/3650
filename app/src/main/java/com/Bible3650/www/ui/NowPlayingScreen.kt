@@ -21,10 +21,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.Bible3650.www.R
 import com.Bible3650.www.audio.SleepTimer
 import kotlinx.coroutines.delay
 
@@ -73,7 +75,7 @@ fun NowPlayingScreen(
                     Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Collapse player")
                 }
                 Text(
-                    "Now Playing",
+                    stringResource(R.string.now_playing),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -86,7 +88,7 @@ fun NowPlayingScreen(
             ) {
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = playingTask?.title ?: "Audio Player",
+                    text = playingTask?.title ?: stringResource(R.string.audio_player),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -167,7 +169,7 @@ fun NowPlayingScreen(
                 Spacer(Modifier.height(16.dp))
 
                 // ── Speed (#1) ───────────────────────────────────────────────
-                Text("Speed", style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.speed), style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SPEED_OPTIONS.forEach { option ->
@@ -191,7 +193,7 @@ fun NowPlayingScreen(
 
             // ── Queue (#5) ───────────────────────────────────────────────────
             Text(
-                "Up Next",
+                stringResource(R.string.up_next),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 24.dp, top = 12.dp, bottom = 4.dp)
@@ -255,9 +257,12 @@ private fun SleepTimerControl(sleepTimer: SleepTimer, viewModel: DashboardViewMo
     }
 
     val label = when (val st = sleepTimer) {
-        is SleepTimer.Off -> "Sleep timer: Off"
-        is SleepTimer.EndOfChapter -> "Sleep timer: End of chapter"
-        is SleepTimer.Timed -> "Sleep timer: ${formatClock((st.endElapsedRealtimeMs - now).coerceAtLeast(0))}"
+        is SleepTimer.Off -> stringResource(R.string.sleep_timer_off)
+        is SleepTimer.EndOfChapter -> stringResource(R.string.sleep_timer_end_of_chapter)
+        is SleepTimer.Timed -> stringResource(
+            R.string.sleep_timer_remaining,
+            formatClock((st.endElapsedRealtimeMs - now).coerceAtLeast(0))
+        )
     }
 
     Box {
@@ -268,16 +273,16 @@ private fun SleepTimerControl(sleepTimer: SleepTimer, viewModel: DashboardViewMo
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
-                text = { Text("Off") },
+                text = { Text(stringResource(R.string.sleep_off)) },
                 onClick = { viewModel.cancelSleepTimer(); expanded = false }
             )
             DropdownMenuItem(
-                text = { Text("End of current chapter") },
+                text = { Text(stringResource(R.string.sleep_end_of_chapter)) },
                 onClick = { viewModel.setSleepTimerEndOfChapter(); expanded = false }
             )
             SLEEP_MINUTE_OPTIONS.forEach { minutes ->
                 DropdownMenuItem(
-                    text = { Text("$minutes minutes") },
+                    text = { Text(stringResource(R.string.sleep_minutes, minutes)) },
                     onClick = { viewModel.setSleepTimerMinutes(minutes); expanded = false }
                 )
             }
