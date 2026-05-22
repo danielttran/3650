@@ -68,7 +68,7 @@ object BibleTextImporter {
         if (verseArray != null && verseArray.all { it is JsonObject }) {
             for (el in verseArray) {
                 val o = el.jsonObject
-                val bookRaw = o.str("book_name") ?: o.str("book") ?: o.str("b") ?: continue
+                val bookRaw = o.str("book_name") ?: o.str("bookname") ?: o.str("book") ?: o.str("b") ?: continue
                 val book = BookNameNormalizer.normalize(bookRaw) ?: continue
                 val chapter = o.int("chapter") ?: o.int("c") ?: continue
                 val text = o.str("text") ?: o.str("t") ?: continue

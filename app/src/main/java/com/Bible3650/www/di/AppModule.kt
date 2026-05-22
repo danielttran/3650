@@ -5,6 +5,8 @@ import android.content.Context
 import androidx.room.Room
 import com.Bible3650.www.audio.AndroidFileSystemProvider
 import com.Bible3650.www.audio.FileSystemProvider
+import com.Bible3650.www.data.text.HttpFetcher
+import com.Bible3650.www.data.text.UrlHttpFetcher
 import com.Bible3650.www.data.local.AppDatabase
 import com.Bible3650.www.data.local.AudioSourceDao
 import com.Bible3650.www.data.local.BibleDao
@@ -32,6 +34,10 @@ abstract class AppModule {
     @Binds
     @Singleton
     abstract fun bindFileSystemProvider(impl: AndroidFileSystemProvider): FileSystemProvider
+
+    @Binds
+    @Singleton
+    abstract fun bindHttpFetcher(impl: UrlHttpFetcher): HttpFetcher
 
     companion object {
         @Provides
