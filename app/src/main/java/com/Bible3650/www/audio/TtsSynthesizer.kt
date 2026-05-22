@@ -59,7 +59,7 @@ class TtsSynthesizer @Inject constructor(
                     val e = engine
                     val res = e?.setLanguage(Locale.getDefault())
                     if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
-                        e?.setLanguage(Locale.US)
+                        e.setLanguage(Locale.US)
                     }
                     voiceTag = (e?.voice?.name ?: e?.defaultEngine ?: "default")
                         .replace(Regex("[^A-Za-z0-9]"), "")

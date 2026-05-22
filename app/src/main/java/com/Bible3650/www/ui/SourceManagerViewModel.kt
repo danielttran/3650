@@ -6,6 +6,7 @@ import android.provider.DocumentsContract
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.Bible3650.www.audio.AudioControllerManager
 import com.Bible3650.www.audio.BookDetectionEngine
 import com.Bible3650.www.audio.DetectionResult
 import com.Bible3650.www.data.BibleRegistry
@@ -39,6 +40,7 @@ class SourceManagerViewModel @Inject constructor(
     private val dao: AudioSourceDao,
     private val engine: BookDetectionEngine,
     private val repository: BibleRepository,
+    private val audioManager: AudioControllerManager,
     private val contentResolver: ContentResolver
 ) : ViewModel() {
 
@@ -234,9 +236,15 @@ class SourceManagerViewModel @Inject constructor(
     fun switchSource(source: AudioSourceEntity) {
         viewModelScope.launch {
             try {
+                // Capture playback before switching so we can resume the same book+chapter
+                // on the new source (position is reset only when the source type changes).
+                val snapshot = audioManager.currentPlaybackSnapshot()
+                val previous = dao.getActiveSource()
+                val typeChanged = previous != null && previous.sourceType != source.sourceType
                 dao.switchTo(source.sourceId)
                 repository.clearCache()
                 refreshSourceHealth()
+                if (snapshot != null) audioManager.resumeFromSnapshot(snapshot, resetPosition = typeChanged)
             } catch (e: Exception) {
                 android.util.Log.e("SourceManager", "Error switching source", e)
                 _uiEvents.emit("Failed to switch audio source.")

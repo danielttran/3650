@@ -21,10 +21,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import android.net.Uri
 import androidx.core.net.toUri
 import javax.inject.Inject
@@ -258,7 +260,8 @@ class AudioControllerManager @Inject constructor(
         tasks: List<DailyTask>,
         startIndex: Int = 0,
         startPositionMs: Long = androidx.media3.common.C.TIME_UNSET,
-        playWhenReady: Boolean = true
+        playWhenReady: Boolean = true,
+        forceReload: Boolean = false
     ) {
         android.util.Log.d("AudioController", "playTasks: tasks=${tasks.size}, startIndex=$startIndex")
         val safeStartIndex = computeSafeStartIndex(tasks.size, startIndex)
@@ -269,8 +272,9 @@ class AudioControllerManager @Inject constructor(
             return
         }
 
-        // Check if the current playlist already matches `tasks`
-        if (tasks.isNotEmpty() && player.mediaItemCount == tasks.size) {
+        // Check if the current playlist already matches `tasks`. Skipped on forceReload so a
+        // source/translation switch re-resolves URIs even though the uniqueIds are unchanged.
+        if (!forceReload && tasks.isNotEmpty() && player.mediaItemCount == tasks.size) {
             var isMatch = true
             for (i in tasks.indices) {
                 if (player.getMediaItemAt(i).mediaId != tasks[i].uniqueId) {
@@ -392,6 +396,33 @@ class AudioControllerManager @Inject constructor(
                     player.replaceMediaItem(i, buildMediaItem(task, uri))
                 }
             }
+        }
+    }
+
+    /** Snapshot of the live player, used to resume the same chapter after a source switch. */
+    data class PlaybackSnapshot(val mediaId: String, val positionMs: Long, val wasPlaying: Boolean)
+
+    fun currentPlaybackSnapshot(): PlaybackSnapshot? {
+        val p = _player.value ?: return null
+        val id = p.currentMediaItem?.mediaId ?: return null
+        return PlaybackSnapshot(id, p.currentPosition.coerceAtLeast(0L), p.isPlaying)
+    }
+
+    /**
+     * Re-points the player at the same book+chapter on the now-active source so a
+     * source/translation switch never loses the user's place. [resetPosition] starts the
+     * chapter from 0 (used when switching across types, e.g. audio↔text, where durations
+     * differ); otherwise the prior position is reused (clamped by the player).
+     */
+    fun resumeFromSnapshot(snapshot: PlaybackSnapshot, resetPosition: Boolean) {
+        scope.launch {
+            val tasks = withTimeoutOrNull(5_000) {
+                repository.dailyTasksFlow.first { list -> list.any { it.uniqueId == snapshot.mediaId } }
+            } ?: return@launch
+            val index = tasks.indexOfFirst { it.uniqueId == snapshot.mediaId }
+            if (index == -1) return@launch
+            val pos = if (resetPosition) 0L else snapshot.positionMs
+            playTasks(tasks, index, pos, playWhenReady = snapshot.wasPlaying, forceReload = true)
         }
     }
 
