@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -30,9 +32,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -575,7 +583,7 @@ fun ManageListsScreen(
                             }
                         }
 
-                        Text("Selected Books", style = MaterialTheme.typography.titleSmall)
+                        Text("Selected Books (long-press the handle to drag)", style = MaterialTheme.typography.titleSmall)
                         if (selectedBooks.isEmpty()) {
                             Text(
                                 "No books selected",
@@ -583,19 +591,67 @@ fun ManageListsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         } else {
+                            // #23: Drag-to-reorder. The list reorders once on drop (no mid-drag
+                            // mutation), so it's robust; the arrow buttons remain as a fallback.
+                            var draggingIndex by remember { mutableStateOf<Int?>(null) }
+                            var dragOffsetY by remember { mutableStateOf(0f) }
+                            var itemHeightPx by remember { mutableStateOf(1) }
+                            val spacingPx = with(LocalDensity.current) { 8.dp.toPx() }
+
                             LazyColumn(
                                 modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 itemsIndexed(selectedBooks, key = { _, book -> "selected_$book" }) { idx, book ->
+                                    val isDragging = idx == draggingIndex
                                     Card(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .onSizeChanged { if (it.height > 0) itemHeightPx = it.height }
+                                            .zIndex(if (isDragging) 1f else 0f)
+                                            .graphicsLayer { translationY = if (isDragging) dragOffsetY else 0f },
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (isDragging)
+                                                MaterialTheme.colorScheme.secondaryContainer
+                                            else
+                                                MaterialTheme.colorScheme.surfaceVariant
+                                        )
                                     ) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
+                                            Icon(
+                                                Icons.Default.DragHandle,
+                                                contentDescription = "Drag to reorder",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.pointerInput(book, selectedBooks.size) {
+                                                    detectDragGesturesAfterLongPress(
+                                                        onDragStart = { draggingIndex = idx; dragOffsetY = 0f },
+                                                        onDrag = { change, amount ->
+                                                            change.consume()
+                                                            dragOffsetY += amount.y
+                                                        },
+                                                        onDragEnd = {
+                                                            val step = itemHeightPx + spacingPx
+                                                            val delta = if (step > 0f) (dragOffsetY / step).roundToInt() else 0
+                                                            val target = (idx + delta).coerceIn(0, selectedBooks.size - 1)
+                                                            if (target != idx) {
+                                                                val m = selectedBooks.toMutableList()
+                                                                m.add(target, m.removeAt(idx))
+                                                                selectedBooks = m
+                                                            }
+                                                            draggingIndex = null
+                                                            dragOffsetY = 0f
+                                                        },
+                                                        onDragCancel = {
+                                                            draggingIndex = null
+                                                            dragOffsetY = 0f
+                                                        }
+                                                    )
+                                                }
+                                            )
+                                            Spacer(Modifier.width(4.dp))
                                             Text(book, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                                             IconButton(
                                                 onClick = {
@@ -633,10 +689,21 @@ fun ManageListsScreen(
                         }
                         HorizontalDivider()
                         Text("Available Books (Tap to add)", style = MaterialTheme.typography.titleSmall)
-                        val available = BibleRegistry.getAllBooks().filter { it !in selectedBooks }
+                        var bookSearch by remember { mutableStateOf("") }
+                        OutlinedTextField(
+                            value = bookSearch,
+                            onValueChange = { bookSearch = it },
+                            label = { Text("Search books") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        val query = bookSearch.trim()
+                        val available = BibleRegistry.getAllBooks()
+                            .filter { it !in selectedBooks && it.contains(query, ignoreCase = true) }
                         if (available.isEmpty()) {
                             Text(
-                                "All books have been added to this list.",
+                                if (query.isEmpty()) "All books have been added to this list."
+                                else "No books match \"$query\".",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
