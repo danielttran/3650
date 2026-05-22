@@ -1,10 +1,13 @@
 package com.Bible3650.www.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
@@ -20,10 +23,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.Bible3650.www.R
+import com.Bible3650.www.data.BibleRegistry
 
 @Composable
 fun HomeScreen(
@@ -58,6 +63,8 @@ fun HomeScreen(
             }
             is DashboardUiState.Active -> {
                 var showFullPlayer by rememberSaveable { mutableStateOf(false) }
+                var jumpTarget by remember { mutableStateOf<TaskUiModel?>(null) }
+                val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
                 val playingTask = remember(uiState.tasks, currentMediaId) {
                     uiState.tasks.find { it.id == currentMediaId }
                 }
@@ -80,6 +87,33 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                     )
 
+                    // Resume-first CTA (#8): one tap to continue or start the rolling lists.
+                    if (!isPlaying) {
+                        val canResume = currentMediaId != null && playingTask != null
+                        val resumeTask = playingTask ?: uiState.tasks.firstOrNull()
+                        if (resumeTask != null) {
+                            FilledTonalButton(
+                                onClick = {
+                                    if (canResume) {
+                                        viewModel.dispatchAction(DashboardAction.PlayPause)
+                                    } else {
+                                        viewModel.dispatchAction(DashboardAction.PlayFrom(resumeTask.id))
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (canResume) "Resume — ${playingTask!!.subtitle}"
+                                    else "Play all lists"
+                                )
+                            }
+                        }
+                    }
+
                     // Scrollable task list + floating mini-player
                     Box(Modifier.weight(1f)) {
                         LazyColumn(
@@ -93,6 +127,7 @@ fun HomeScreen(
                                     onPlayClick = {
                                         viewModel.dispatchAction(DashboardAction.PlayFrom(task.id))
                                     },
+                                    onJump = { jumpTarget = task },
                                     onDecrement = {
                                         viewModel.dispatchAction(DashboardAction.DecrementProgress(task.listId))
                                     },
@@ -122,6 +157,18 @@ fun HomeScreen(
                         currentMediaId = currentMediaId,
                         viewModel = viewModel,
                         onCollapse = { showFullPlayer = false }
+                    )
+                }
+
+                // Jump-to-chapter dialog (#6) — opened by long-pressing a list row.
+                jumpTarget?.let { target ->
+                    JumpToChapterDialog(
+                        task = target,
+                        onDismiss = { jumpTarget = null },
+                        onJump = { book, chapter ->
+                            viewModel.jumpToChapter(target.listId, book, chapter)
+                            jumpTarget = null
+                        }
                     )
                 }
             }
@@ -246,11 +293,13 @@ private fun TimeRemainingText(duration: Long, viewModel: DashboardViewModel) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ListEntryItem(
     task: TaskUiModel,
     isPlaying: Boolean,
     onPlayClick: () -> Unit,
+    onJump: () -> Unit,
     onDecrement: () -> Unit,
     onIncrement: () -> Unit
 ) {
@@ -287,7 +336,7 @@ fun ListEntryItem(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onPlayClick() },
+            .combinedClickable(onClick = onPlayClick, onLongClick = onJump),
         color = backgroundColor,
     ) {
         Box {
@@ -300,7 +349,7 @@ fun ListEntryItem(
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "${task.title} (${task.totalChapters})",
+                            text = task.title,
                             style = MaterialTheme.typography.titleMedium,
                             color = titleColor
                         )
@@ -319,6 +368,28 @@ fun ListEntryItem(
                         style = MaterialTheme.typography.bodyMedium,
                         color = subtitleColor
                     )
+                    // Loop-progress indicator (#7): where this list sits in its cycle.
+                    if (task.totalChapters > 0) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            LinearProgressIndicator(
+                                progress = {
+                                    (task.loopPosition.toFloat() / task.totalChapters).coerceIn(0f, 1f)
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(4.dp),
+                                color = iconColor,
+                                trackColor = iconColor.copy(alpha = 0.2f)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "${task.loopPosition} / ${task.totalChapters}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = subtitleColor
+                            )
+                        }
+                    }
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -340,4 +411,71 @@ fun ListEntryItem(
             )
         }
     }
+}
+
+@Composable
+private fun JumpToChapterDialog(
+    task: TaskUiModel,
+    onDismiss: () -> Unit,
+    onJump: (book: String, chapter: Int) -> Unit
+) {
+    val books = task.books.ifEmpty { listOf(task.targetBook) }
+    var selectedBook by remember {
+        mutableStateOf(if (task.targetBook in books) task.targetBook else books.first())
+    }
+    var chapterText by remember { mutableStateOf(task.targetChapter.toString()) }
+    var bookMenuOpen by remember { mutableStateOf(false) }
+
+    val maxChapter = BibleRegistry.getChapterCount(selectedBook).coerceAtLeast(1)
+    val parsedChapter = chapterText.toIntOrNull()
+    val valid = parsedChapter != null && parsedChapter in 1..maxChapter
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Jump to chapter") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    task.title,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (books.size > 1) {
+                    Box {
+                        OutlinedButton(onClick = { bookMenuOpen = true }) { Text(selectedBook) }
+                        DropdownMenu(expanded = bookMenuOpen, onDismissRequest = { bookMenuOpen = false }) {
+                            books.forEach { b ->
+                                DropdownMenuItem(
+                                    text = { Text(b) },
+                                    onClick = {
+                                        selectedBook = b
+                                        chapterText = "1"
+                                        bookMenuOpen = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Text(selectedBook, style = MaterialTheme.typography.titleSmall)
+                }
+                OutlinedTextField(
+                    value = chapterText,
+                    onValueChange = { chapterText = it.filter { c -> c.isDigit() }.take(3) },
+                    label = { Text("Chapter (1–$maxChapter)") },
+                    singleLine = true,
+                    isError = chapterText.isNotEmpty() && !valid,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = valid, onClick = { onJump(selectedBook, parsedChapter ?: 1) }) {
+                Text("Jump")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }

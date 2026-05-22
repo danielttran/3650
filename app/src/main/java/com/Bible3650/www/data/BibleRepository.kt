@@ -208,7 +208,19 @@ class BibleRepository @Inject constructor(
         // fileUri is resolved asynchronously later by the ViewModel to prevent IPC blocking
         val fileUri = ""
 
-        val totalChapters = listData.books.sumOf { BibleRegistry.getChapterCount(it.bookName) }
+        val sortedBooks = listData.books.sortedBy { it.sortOrder }
+        val totalChapters = sortedBooks.sumOf { BibleRegistry.getChapterCount(it.bookName) }
+
+        // Cumulative position (1..totalChapters) of the current chapter within the cycle.
+        var loopPosition = 0
+        for (b in sortedBooks) {
+            val count = BibleRegistry.getChapterCount(b.bookName)
+            if (b.bookName == targetBook) {
+                loopPosition += targetChapter.coerceIn(0, count)
+                break
+            }
+            loopPosition += count
+        }
 
         return DailyTask(
             listId        = list.listId,
@@ -221,9 +233,41 @@ class BibleRepository @Inject constructor(
             targetBook    = targetBook,
             targetChapter = targetChapter,
             totalChapters = totalChapters,
+            loopPosition  = loopPosition,
+            books         = sortedBooks.map { it.bookName },
             fileUri       = fileUri,
             listColor     = list.listColor
         )
+    }
+
+    /**
+     * Repositions a list's cursor to [targetBook] [targetChapter] without changing the
+     * lifetime progress counter, so manual jumps don't inflate or erase read statistics.
+     * Implemented as an adjustment to the manual offset (which also clears the frozen task).
+     */
+    suspend fun jumpToChapter(listId: Long, targetBook: String, targetChapter: Int) {
+        val listData = dao.getListWithBooksById(listId) ?: return
+        val sortedBooks = listData.books.sortedBy { it.sortOrder }
+        val total = sortedBooks.sumOf { BibleRegistry.getChapterCount(it.bookName) }
+        if (total == 0) return
+
+        var position = 0
+        var matched = false
+        for (b in sortedBooks) {
+            val count = BibleRegistry.getChapterCount(b.bookName)
+            if (b.bookName == targetBook) {
+                position += targetChapter.coerceIn(1, count)
+                matched = true
+                break
+            }
+            position += count
+        }
+        if (!matched || position <= 0) return
+
+        // Choose an offset so the computed position lands on `position` while leaving
+        // currentDayIndex (and therefore stats) untouched.
+        val newOffset = position - listData.readingList.currentDayIndex
+        dao.updateManualOffset(listId, newOffset)
     }
 
     suspend fun getTaskFileUri(targetBook: String, targetChapter: Int): String {
@@ -243,12 +287,6 @@ class BibleRepository @Inject constructor(
         val list = dao.getListById(listId) ?: return
         val newIndex = list.currentDayIndex + 1
         // Setting book/chapter to null lets the init observer freeze the next task
-        dao.updateListProgress(listId, newIndex, null, null)
-    }
-
-    suspend fun revertListDay(listId: Long) {
-        val list = dao.getListById(listId) ?: return
-        val newIndex = maxOf(1, list.currentDayIndex - 1)
         dao.updateListProgress(listId, newIndex, null, null)
     }
 

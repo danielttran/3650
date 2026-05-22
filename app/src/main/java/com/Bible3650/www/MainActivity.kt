@@ -77,14 +77,10 @@ fun Bible3650App(dashboardViewModel: DashboardViewModel) {
         dashboardViewModel.uiEvents.collect { event ->
             when (event) {
                 is DashboardUiEvent.ShowSnackbar -> {
-                    val result = snackbarHostState.showSnackbar(
+                    snackbarHostState.showSnackbar(
                         message = event.message,
-                        actionLabel = event.actionLabel,
                         duration = SnackbarDuration.Short
                     )
-                    if (result == SnackbarResult.ActionPerformed) {
-                        dashboardViewModel.dispatchAction(DashboardAction.UndoComplete(event.listId))
-                    }
                 }
             }
         }

@@ -21,7 +21,11 @@ data class TaskUiModel(
     val listId: Long,
     val title: String,
     val subtitle: String,
+    val targetBook: String,
+    val targetChapter: Int,
     val totalChapters: Int,
+    val loopPosition: Int = 0,
+    val books: List<String> = emptyList(),
     val fileUri: String,
     val listColor: Int = 0
 )
@@ -33,8 +37,6 @@ sealed interface DashboardUiState {
 }
 
 sealed interface DashboardAction {
-    data class CompleteTask(val listId: Long) : DashboardAction
-    data class UndoComplete(val listId: Long) : DashboardAction
     data class IncrementProgress(val listId: Long) : DashboardAction
     data class DecrementProgress(val listId: Long) : DashboardAction
     data class PlayFrom(val taskId: String) : DashboardAction
@@ -46,7 +48,7 @@ sealed interface DashboardAction {
 }
 
 sealed interface DashboardUiEvent {
-    data class ShowSnackbar(val message: String, val actionLabel: String, val listId: Long) : DashboardUiEvent
+    data class ShowSnackbar(val message: String) : DashboardUiEvent
 }
 
 @HiltViewModel
@@ -76,7 +78,11 @@ class DashboardViewModel @Inject constructor(
                 listId        = task.listId,
                 title         = task.listName,
                 subtitle      = "${task.targetBook} ${task.targetChapter}",
+                targetBook    = task.targetBook,
+                targetChapter = task.targetChapter,
                 totalChapters = task.totalChapters,
+                loopPosition  = task.loopPosition,
+                books         = task.books,
                 fileUri       = task.fileUri,
                 listColor     = task.listColor
             )
@@ -104,11 +110,7 @@ class DashboardViewModel @Inject constructor(
         // #13: Forward audio playback errors (e.g. unresolvable URI) as snackbar events.
         viewModelScope.launch {
             audioManager.playerError.collect { errorMsg ->
-                _uiEvents.emit(DashboardUiEvent.ShowSnackbar(
-                    message = errorMsg,
-                    actionLabel = "",
-                    listId = -1L
-                ))
+                _uiEvents.emit(DashboardUiEvent.ShowSnackbar(errorMsg))
             }
         }
         // Track completion is handled inside AudioControllerManager's own scope,
@@ -171,20 +173,16 @@ class DashboardViewModel @Inject constructor(
         audioManager.playTasks(tasks, index, savedPos, playWhenReady = false)
     }
 
+    fun jumpToChapter(listId: Long, book: String, chapter: Int) {
+        viewModelScope.launch {
+            repository.jumpToChapter(listId, book, chapter)
+            syncPlayerIfPlaying(listId)
+        }
+    }
+
     fun dispatchAction(action: DashboardAction) {
         android.util.Log.d("DashboardVM", "Dispatching action: $action")
         when (action) {
-            is DashboardAction.CompleteTask -> viewModelScope.launch {
-                repository.advanceListDay(action.listId)
-                _uiEvents.emit(DashboardUiEvent.ShowSnackbar(
-                    message = "Task completed",
-                    actionLabel = "Undo",
-                    listId = action.listId
-                ))
-            }
-            is DashboardAction.UndoComplete -> viewModelScope.launch {
-                repository.revertListDay(action.listId)
-            }
             is DashboardAction.IncrementProgress -> viewModelScope.launch {
                 repository.incrementManualOffset(action.listId)
                 syncPlayerIfPlaying(action.listId)
