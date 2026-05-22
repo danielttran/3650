@@ -1,12 +1,16 @@
 name: Android CI
 
-# Performs the full compile + unit-test audit on GitHub-hosted runners, which have
-# the Android SDK and unrestricted access to Google's Maven repository.
+# Runs the full compile + unit tests on GitHub-hosted runners (which have the
+# Android SDK and access to Google Maven, unlike the dev sandbox).
 on:
   push:
-    branches: [ "main", "claude/**" ]
+    branches: [ "main" ]
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
   build:
@@ -26,19 +30,32 @@ jobs:
       - name: Install required SDK packages
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      - name: Unit tests
-        run: ./gradlew --no-daemon testDebugUnitTest
+      - name: Build and test
+        id: build
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --stacktrace testDebugUnitTest assembleDebug 2>&1 | tee build-output.txt
 
-      - name: Assemble debug APK
-        run: ./gradlew --no-daemon assembleDebug
+      - name: Surface failure log to PR
+        if: failure() && github.event.pull_request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "### Android CI build failed"
+            echo ""
+            echo "Last 250 lines of build output:"
+            echo '```'
+            tail -n 250 build-output.txt
+            echo '```'
+          } > comment.md
+          gh pr comment ${{ github.event.pull_request.number }} --body-file comment.md
 
       - name: Upload debug APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
