@@ -7,6 +7,7 @@ import androidx.core.net.toUri
 import com.Bible3650.www.data.local.AudioSourceDao
 import com.Bible3650.www.data.local.AudioSourceEntity
 import com.Bible3650.www.data.local.BibleDao
+import com.Bible3650.www.data.local.BibleTextDao
 import com.Bible3650.www.data.local.BookMappingEntity
 import com.Bible3650.www.data.local.DailyTask
 import com.Bible3650.www.data.local.ListWithBooks
@@ -54,6 +55,7 @@ class BibleRepository @Inject constructor(
     // go through repository methods which also handle cache invalidation.
     internal val dao: BibleDao,
     internal val audioSourceDao: AudioSourceDao,
+    internal val bibleTextDao: BibleTextDao,
     private val contentResolver: ContentResolver
 ) {
     // Shared cache of folder→sorted-docIds so both dailyTasksFlow and
@@ -283,6 +285,16 @@ class BibleRepository @Inject constructor(
 
     suspend fun getTaskFileUri(targetBook: String, targetChapter: Int): String {
         val activeSource = audioSourceDao.getActiveSource() ?: return ""
+
+        // For TEXT (TTS) sources, report availability cheaply WITHOUT synthesizing — the
+        // actual audio is rendered lazily at play time. This sentinel is never played; it
+        // only signals to the UI/resync that this chapter has text.
+        if (activeSource.sourceType == "TEXT") {
+            val tid = activeSource.translationId ?: return ""
+            return if (bibleTextDao.getChapter(tid, targetBook, targetChapter) != null)
+                "tts://$tid/$targetBook/$targetChapter" else ""
+        }
+
         val mapping = audioSourceDao.getMappingForBook(activeSource.sourceId, targetBook) ?: return ""
 
         return try {

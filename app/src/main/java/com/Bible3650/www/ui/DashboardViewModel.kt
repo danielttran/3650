@@ -122,6 +122,7 @@ class DashboardViewModel @Inject constructor(
     val duration: StateFlow<Long> = audioManager.duration
     val playbackSpeed: StateFlow<Float> = audioManager.playbackSpeed
     val sleepTimer: StateFlow<SleepTimer> = audioManager.sleepTimer
+    val isSynthesizing: StateFlow<Boolean> = audioManager.isSynthesizing
 
     fun setSpeed(speed: Float) = audioManager.setPlaybackSpeed(speed)
     fun seekTo(positionMs: Long) = audioManager.seekTo(positionMs)

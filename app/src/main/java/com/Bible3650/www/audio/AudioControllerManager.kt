@@ -57,6 +57,7 @@ sealed interface SleepTimer {
 class AudioControllerManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: BibleRepository,
+    private val ttsSynthesizer: TtsSynthesizer,
     @MainDispatcher private val mainDispatcher: CoroutineDispatcher,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -89,6 +90,9 @@ class AudioControllerManager @Inject constructor(
     // #13: Expose playback errors (e.g. unresolvable audio URI) so the UI can show a snackbar.
     private val _playerError = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val playerError: SharedFlow<String> = _playerError.asSharedFlow()
+
+    /** True while a text chapter is being rendered to audio (TTS sources). */
+    val isSynthesizing: StateFlow<Boolean> = ttsSynthesizer.isSynthesizing
 
     // #10: Singleton scope — never cancelled. release() only tears down the MediaController,
     // not the scope itself, so coroutines launched after reconnect work correctly.
@@ -289,9 +293,14 @@ class AudioControllerManager @Inject constructor(
 
         scope.launch(ioDispatcher) {
             try {
+                val activeSource = repository.audioSourceDao.getActiveSource()
+                if (activeSource?.sourceType == "TEXT") {
+                    playTextTasks(tasks, safeStartIndex, startPositionMs, playWhenReady, requestId, activeSource.translationId)
+                    return@launch
+                }
+
                 val activeMappings = repository.audioSourceDao.observeActiveMappings().firstOrNull() ?: emptyList()
                 val mappingsByBook = activeMappings.associateBy { it.bookName }
-                val activeSource   = repository.audioSourceDao.getActiveSource()
 
                 suspend fun resolveUri(task: DailyTask): Uri? {
                     val mapping = mappingsByBook[task.targetBook] ?: return null
@@ -303,15 +312,7 @@ class AudioControllerManager @Inject constructor(
                 // Resolve all URIs up front (single atomic playlist set, no seek race)
                 val allMediaItems = tasks.map { task ->
                     val uri = resolveUri(task)
-                    MediaItem.Builder()
-                        .setMediaId(task.uniqueId)
-                        .setUri(uri)
-                        .setRequestMetadata(
-                            MediaItem.RequestMetadata.Builder()
-                                .setMediaUri(uri)
-                                .build()
-                        )
-                        .build()
+                    buildMediaItem(task, uri)
                 }
 
                 // #13: Warn if the start item has no resolvable URI, and also report
@@ -338,6 +339,58 @@ class AudioControllerManager @Inject constructor(
                 }
             } catch (e: Exception) {
                 android.util.Log.e("AudioController", "Failed to play tasks", e)
+            }
+        }
+    }
+
+    private fun buildMediaItem(task: DailyTask, uri: Uri?): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(task.uniqueId)
+            .setUri(uri)
+            .setRequestMetadata(MediaItem.RequestMetadata.Builder().setMediaUri(uri).build())
+            .build()
+
+    // TEXT (TTS) playback: synthesize the start chapter synchronously so playback can begin,
+    // set the playlist (other items start URI-less), then prefetch the remaining chapters in
+    // play order and swap them in via replaceMediaItem before they're reached.
+    private suspend fun playTextTasks(
+        tasks: List<DailyTask>,
+        safeStartIndex: Int,
+        startPositionMs: Long,
+        playWhenReady: Boolean,
+        requestId: Long,
+        translationId: Long?
+    ) {
+        val player = _player.value ?: return
+        val startTask = tasks.getOrNull(safeStartIndex)
+        val startUri = startTask?.let { ttsSynthesizer.synthesizeChapter(translationId, it.targetBook, it.targetChapter) }
+        if (startUri == null) {
+            _playerError.tryEmit("Couldn't read this chapter aloud. Check the text source.")
+        }
+
+        val mediaItems = tasks.mapIndexed { i, task ->
+            buildMediaItem(task, if (i == safeStartIndex) startUri else null)
+        }
+        withContext(mainDispatcher) {
+            if (requestId != currentPlaylistRequestId) return@withContext
+            val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs
+                           else androidx.media3.common.C.TIME_UNSET
+            player.setMediaItems(mediaItems, safeStartIndex, startPos)
+            player.prepare()
+            if (playWhenReady) player.play() else player.pause()
+        }
+
+        // Prefetch the rest in play order (after the start, then wrap to the beginning).
+        val order = (safeStartIndex + 1 until tasks.size) + (0 until safeStartIndex)
+        for (i in order) {
+            if (requestId != currentPlaylistRequestId) return
+            val task = tasks[i]
+            val uri = ttsSynthesizer.synthesizeChapter(translationId, task.targetBook, task.targetChapter) ?: continue
+            withContext(mainDispatcher) {
+                if (requestId != currentPlaylistRequestId) return@withContext
+                if (i < player.mediaItemCount && player.getMediaItemAt(i).mediaId == task.uniqueId) {
+                    player.replaceMediaItem(i, buildMediaItem(task, uri))
+                }
             }
         }
     }
