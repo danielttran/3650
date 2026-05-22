@@ -48,6 +48,8 @@ class TtsSynthesizer @Inject constructor(
 
     private val _isSynthesizing = MutableStateFlow(false)
     val isSynthesizing: StateFlow<Boolean> = _isSynthesizing
+    // Counts in-flight syntheses so overlapping calls don't clear the flag prematurely.
+    private val synthInFlight = AtomicInteger(0)
 
     private suspend fun ensureReady(): Boolean = initMutex.withLock {
         if (ready) return true
@@ -99,7 +101,7 @@ class TtsSynthesizer @Inject constructor(
             val text = textDao.getChapter(translationId, book, chapter)?.text?.takeIf { it.isNotBlank() }
                 ?: return@withContext null
 
-            _isSynthesizing.value = true
+            _isSynthesizing.value = synthInFlight.incrementAndGet() > 0
             try {
                 val chunks = chunkText(text, MAX_CHARS)
                 val tmp = File(cacheDir, finalFile.name + ".tmp")
@@ -122,7 +124,7 @@ class TtsSynthesizer @Inject constructor(
                 evictIfOverCap()
                 if (finalFile.isFile) finalFile.toUri() else null
             } finally {
-                _isSynthesizing.value = false
+                _isSynthesizing.value = synthInFlight.decrementAndGet() > 0
             }
         }
     }
