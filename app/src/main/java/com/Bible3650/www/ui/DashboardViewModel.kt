@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
 import com.Bible3650.www.audio.AudioControllerManager
+import com.Bible3650.www.audio.SleepTimer
 import com.Bible3650.www.data.BibleRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,9 @@ sealed interface DashboardAction {
     data class PlayFrom(val taskId: String) : DashboardAction
     object PlayPause : DashboardAction
     object SkipNext : DashboardAction
+    object SkipPrevious : DashboardAction
+    object Rewind : DashboardAction
+    object FastForward : DashboardAction
 }
 
 sealed interface DashboardUiEvent {
@@ -114,6 +118,14 @@ class DashboardViewModel @Inject constructor(
     val isPlaying: StateFlow<Boolean> = audioManager.isPlaying
     val currentPosition: StateFlow<Long> = audioManager.currentPosition
     val duration: StateFlow<Long> = audioManager.duration
+    val playbackSpeed: StateFlow<Float> = audioManager.playbackSpeed
+    val sleepTimer: StateFlow<SleepTimer> = audioManager.sleepTimer
+
+    fun setSpeed(speed: Float) = audioManager.setPlaybackSpeed(speed)
+    fun seekTo(positionMs: Long) = audioManager.seekTo(positionMs)
+    fun setSleepTimerMinutes(minutes: Int) = audioManager.setSleepTimerMinutes(minutes)
+    fun setSleepTimerEndOfChapter() = audioManager.setSleepTimerEndOfChapter()
+    fun cancelSleepTimer() = audioManager.cancelSleepTimer()
 
     private suspend fun syncPlayerIfPlaying(listId: Long) {
         val currentId = currentMediaId.value ?: return
@@ -194,6 +206,9 @@ class DashboardViewModel @Inject constructor(
             }
             is DashboardAction.PlayPause -> audioManager.togglePlayPause()
             is DashboardAction.SkipNext  -> audioManager.skipToNext()
+            is DashboardAction.SkipPrevious -> audioManager.skipToPrevious()
+            is DashboardAction.Rewind -> audioManager.rewind()
+            is DashboardAction.FastForward -> audioManager.fastForward()
         }
     }
 }

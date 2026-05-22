@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -56,6 +57,7 @@ fun HomeScreen(
                 }
             }
             is DashboardUiState.Active -> {
+                var showFullPlayer by rememberSaveable { mutableStateOf(false) }
                 val playingTask = remember(uiState.tasks, currentMediaId) {
                     uiState.tasks.find { it.id == currentMediaId }
                 }
@@ -107,9 +109,20 @@ fun HomeScreen(
                         MiniPlayerBar(
                             playingTask = playingTask,
                             viewModel = viewModel,
+                            onExpand = { showFullPlayer = true },
                             modifier = Modifier.align(Alignment.BottomCenter)
                         )
                     }
+                }
+
+                // Full-screen Now Playing overlay (#5)
+                if (showFullPlayer) {
+                    NowPlayingScreen(
+                        tasks = uiState.tasks,
+                        currentMediaId = currentMediaId,
+                        viewModel = viewModel,
+                        onCollapse = { showFullPlayer = false }
+                    )
                 }
             }
         }
@@ -120,6 +133,7 @@ fun HomeScreen(
 private fun MiniPlayerBar(
     playingTask: TaskUiModel?,
     viewModel: DashboardViewModel,
+    onExpand: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
@@ -146,18 +160,19 @@ private fun MiniPlayerBar(
                     .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                // Tapping the title area expands the full Now Playing screen.
+                Column(modifier = Modifier.weight(1f).clickable { onExpand() }) {
                     Text(
-                        "${playingTask?.title ?: "Audio Player"} (${playingTask?.totalChapters ?: 0})",
+                        playingTask.title,
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
                         maxLines = 1
                     )
                     Text(
-                        playingTask?.subtitle ?: "Playing…",
+                        playingTask.subtitle,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                         maxLines = 1
                     )
                     TimeRemainingText(duration = duration, viewModel = viewModel)
@@ -171,7 +186,7 @@ private fun MiniPlayerBar(
                         imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = "Play/Pause",
                         modifier = Modifier.size(52.dp),
-                        tint = MaterialTheme.colorScheme.onSurface
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
                     )
                 }
 
@@ -183,7 +198,7 @@ private fun MiniPlayerBar(
                         imageVector = Icons.Default.SkipNext,
                         contentDescription = "Skip",
                         modifier = Modifier.size(52.dp),
-                        tint = MaterialTheme.colorScheme.onSurface
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
                     )
                 }
             }

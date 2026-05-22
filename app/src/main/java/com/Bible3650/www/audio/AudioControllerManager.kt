@@ -36,9 +36,22 @@ import com.Bible3650.www.di.IoDispatcher
 private const val PREFS_NAME = "audio_playback_state"
 private const val KEY_MEDIA_ID = "last_media_id"
 private const val KEY_POSITION = "last_position_ms"
+private const val KEY_SPEED = "playback_speed"
+
+const val MIN_PLAYBACK_SPEED = 0.5f
+const val MAX_PLAYBACK_SPEED = 3.0f
 
 // Separator in uniqueId format "listId_dayOffset_book_chapter"; listId is the first segment.
 private const val TASK_ID_SEPARATOR = "_"
+
+/** State of the optional sleep timer that auto-pauses playback. */
+sealed interface SleepTimer {
+    object Off : SleepTimer
+    /** Pause when the currently playing chapter finishes. */
+    object EndOfChapter : SleepTimer
+    /** Pause at [endElapsedRealtimeMs] (SystemClock.elapsedRealtime base). */
+    data class Timed(val endElapsedRealtimeMs: Long) : SleepTimer
+}
 
 @Singleton
 class AudioControllerManager @Inject constructor(
@@ -63,6 +76,13 @@ class AudioControllerManager @Inject constructor(
     private val _duration = MutableStateFlow(0L)
     val duration: StateFlow<Long> = _duration
 
+    private val _playbackSpeed = MutableStateFlow(1.0f)
+    val playbackSpeed: StateFlow<Float> = _playbackSpeed
+
+    private val _sleepTimer = MutableStateFlow<SleepTimer>(SleepTimer.Off)
+    val sleepTimer: StateFlow<SleepTimer> = _sleepTimer
+    private var sleepTimerJob: Job? = null
+
     // #13: Expose playback errors (e.g. unresolvable audio URI) so the UI can show a snackbar.
     private val _playerError = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val playerError: SharedFlow<String> = _playerError.asSharedFlow()
@@ -78,6 +98,8 @@ class AudioControllerManager @Inject constructor(
     val savedPosition: Long get() = prefs.getLong(KEY_POSITION, 0L)
 
     init {
+        _playbackSpeed.value = prefs.getFloat(KEY_SPEED, 1.0f)
+            .coerceIn(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED)
         initializeController()
     }
 
@@ -125,6 +147,8 @@ class AudioControllerManager @Inject constructor(
             }
 
             _player.value = mediaController
+            // Re-apply the persisted playback speed across reconnect cycles.
+            mediaController.setPlaybackSpeed(_playbackSpeed.value)
 
             mediaController.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -169,6 +193,11 @@ class AudioControllerManager @Inject constructor(
                                     }
                                 }
                             }
+                        // Sleep timer: stop once the chapter that was playing has finished.
+                        if (_sleepTimer.value is SleepTimer.EndOfChapter) {
+                            mediaController.pause()
+                            _sleepTimer.value = SleepTimer.Off
+                        }
                     }
                 }
 
@@ -322,11 +351,74 @@ class AudioControllerManager @Inject constructor(
         _player.value?.seekToNext()
     }
 
+    fun skipToPrevious() {
+        _player.value?.seekToPrevious()
+    }
+
+    /** Rewind within the current chapter by the configured increment (15s). */
+    fun rewind() {
+        _player.value?.seekBack()
+    }
+
+    /** Fast-forward within the current chapter by the configured increment (15s). */
+    fun fastForward() {
+        _player.value?.seekForward()
+    }
+
+    /** Seek to an absolute position (ms) within the current chapter. */
+    fun seekTo(positionMs: Long) {
+        val player = _player.value ?: return
+        player.seekTo(positionMs.coerceAtLeast(0L))
+        _currentPosition.value = positionMs.coerceAtLeast(0L)
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        val clamped = speed.coerceIn(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED)
+        _playbackSpeed.value = clamped
+        _player.value?.setPlaybackSpeed(clamped)
+        prefs.edit().putFloat(KEY_SPEED, clamped).apply()
+    }
+
+    /** Arm a countdown sleep timer; [minutes] <= 0 cancels it. */
+    fun setSleepTimerMinutes(minutes: Int) {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        if (minutes <= 0) {
+            _sleepTimer.value = SleepTimer.Off
+            return
+        }
+        val end = android.os.SystemClock.elapsedRealtime() + minutes * 60_000L
+        _sleepTimer.value = SleepTimer.Timed(end)
+        sleepTimerJob = scope.launch {
+            val remaining = end - android.os.SystemClock.elapsedRealtime()
+            if (remaining > 0) delay(remaining)
+            _player.value?.pause()
+            _sleepTimer.value = SleepTimer.Off
+            sleepTimerJob = null
+        }
+    }
+
+    /** Pause automatically once the current chapter finishes. */
+    fun setSleepTimerEndOfChapter() {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        _sleepTimer.value = SleepTimer.EndOfChapter
+    }
+
+    fun cancelSleepTimer() {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        _sleepTimer.value = SleepTimer.Off
+    }
+
     // #10: Do NOT cancel the singleton scope here. The scope must survive across
     // release/reconnect cycles. Only tear down the controller and position job.
     fun release() {
         positionUpdateJob?.cancel()
         positionUpdateJob = null
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        _sleepTimer.value = SleepTimer.Off
         _isPlaying.value = false
         // Clear playback state so the UI doesn't show stale "Now Playing" after
         // the service is destroyed and before a new controller connects.
