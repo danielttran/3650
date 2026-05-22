@@ -49,4 +49,23 @@ class ListValidatorTest {
         assertFalse(result.isValid)
         assertEquals(BibleRegistry.getAllBooks().size, result.missingBooks.size)
     }
+
+    @Test
+    fun `apocrypha list does not affect canonical missing-book check`() {
+        val allCanonical = list(1, *BibleRegistry.getAllBooks().toTypedArray())
+        val apocrypha = list(2, "Tobit", "Judith", "Sirach")
+        val result = ListValidator.validateCustomLists(listOf(allCanonical, apocrypha))
+        assertTrue(result.isValid)
+        assertTrue(result.missingBooks.isEmpty())
+        assertTrue(result.duplicateBooks.isEmpty())
+    }
+
+    @Test
+    fun `duplicate apocryphal book across lists is reported`() {
+        val a = list(1, "Tobit")
+        val b = list(2, "Tobit")
+        val result = ListValidator.validateCustomLists(listOf(a, b))
+        assertFalse(result.isValid)
+        assertEquals(listOf("Tobit"), result.duplicateBooks)
+    }
 }

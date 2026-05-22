@@ -81,6 +81,12 @@
     <string name="delete_list_title">Delete \"%1$s\"?</string>
     <string name="detection_error">Detection error: %1$s</string>
 
+    <!-- Apocrypha detection -->
+    <string name="apocrypha_detected_title">Apocrypha detected</string>
+    <string name="apocrypha_detected_message">Found %1$d apocryphal book(s) in this source: %2$s.\n\nCreate an \"Apocrypha\" reading list from them?</string>
+    <string name="apocrypha_create_list">Create list</string>
+    <string name="action_not_now">Not now</string>
+
     <!-- Review Mappings -->
     <string name="not_linked_tap">Not linked — tap to pick folder</string>
     <string name="books_mapped">%1$d / %2$d books mapped</string>

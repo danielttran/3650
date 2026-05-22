@@ -7,6 +7,8 @@ import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.Bible3650.www.audio.BookDetectionEngine
+import com.Bible3650.www.audio.DetectionResult
+import com.Bible3650.www.data.BibleRegistry
 import com.Bible3650.www.data.BibleRepository
 import com.Bible3650.www.data.local.AudioSourceDao
 import com.Bible3650.www.data.local.AudioSourceEntity
@@ -50,6 +52,11 @@ class SourceManagerViewModel @Inject constructor(
     // moved/deleted). Surfaced in the UI with a re-link prompt.
     private val _unavailableSourceIds = MutableStateFlow<Set<Long>>(emptySet())
     val unavailableSourceIds: StateFlow<Set<Long>> = _unavailableSourceIds
+
+    // Apocryphal books detected in the most recent scan; non-empty drives a "create an
+    // Apocrypha list?" prompt. Cleared on dismiss or after the list is created.
+    private val _apocryphaSuggestion = MutableStateFlow<List<String>>(emptyList())
+    val apocryphaSuggestion: StateFlow<List<String>> = _apocryphaSuggestion
 
     /** Re-checks whether each source's root folder is still accessible. */
     fun refreshSourceHealth() {
@@ -119,6 +126,7 @@ class SourceManagerViewModel @Inject constructor(
 
                 repository.clearCache()
                 refreshSourceHealth()
+                updateApocryphaSuggestion(results)
                 _detectionState.value = DetectionState.Done(sourceId)
             } catch (e: Exception) {
                 android.util.Log.e("SourceManager", "Error adding source", e)
@@ -166,6 +174,7 @@ class SourceManagerViewModel @Inject constructor(
                 }
                 repository.clearCache()
                 refreshSourceHealth()
+                updateApocryphaSuggestion(results)
                 _detectionState.value = DetectionState.Done(sourceId)
             } catch (e: Exception) {
                 android.util.Log.e("SourceManager", "Error re-linking source", e)
@@ -176,6 +185,47 @@ class SourceManagerViewModel @Inject constructor(
 
     fun resetDetectionState() {
         _detectionState.value = DetectionState.Idle
+    }
+
+    private fun updateApocryphaSuggestion(results: List<DetectionResult>) {
+        val order = BibleRegistry.getApocryphalBooks()
+        _apocryphaSuggestion.value = results
+            .filter {
+                it.folderDocId != null &&
+                    it.confidence >= BookDetectionEngine.MIN_CONFIDENCE_THRESHOLD &&
+                    BibleRegistry.isApocryphal(it.bookName)
+            }
+            .map { it.bookName }
+            .sortedBy { order.indexOf(it) }
+    }
+
+    /** Creates a new "Apocrypha" list (or merges into an existing one) from the detected books. */
+    fun createOrUpdateApocryphaList() {
+        val detected = _apocryphaSuggestion.value
+        if (detected.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val existing = withContext(Dispatchers.IO) {
+                    repository.dao.getAllLists()
+                        .firstOrNull { it.readingList.listName.equals(APOCRYPHA_LIST_NAME, ignoreCase = true) }
+                }
+                if (existing == null) {
+                    repository.createList(APOCRYPHA_LIST_NAME, detected, 0)
+                } else {
+                    val existingBooks = existing.books.sortedBy { it.sortOrder }.map { it.bookName }
+                    val merged = existingBooks + detected.filter { it !in existingBooks }
+                    repository.updateList(existing.readingList, merged)
+                }
+                _apocryphaSuggestion.value = emptyList()
+            } catch (e: Exception) {
+                android.util.Log.e("SourceManager", "Failed to create Apocrypha list", e)
+                _uiEvents.emit("Failed to create Apocrypha list.")
+            }
+        }
+    }
+
+    fun dismissApocryphaSuggestion() {
+        _apocryphaSuggestion.value = emptyList()
     }
 
     private val _uiEvents = MutableSharedFlow<String>()
@@ -207,4 +257,7 @@ class SourceManagerViewModel @Inject constructor(
         }
     }
 
+    private companion object {
+        const val APOCRYPHA_LIST_NAME = "Apocrypha"
+    }
 }

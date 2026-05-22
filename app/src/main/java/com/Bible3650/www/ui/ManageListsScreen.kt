@@ -65,6 +65,7 @@ fun ManageListsScreen(
     val sources by sourceViewModel.sources.collectAsStateWithLifecycle()
     val detectionState by sourceViewModel.detectionState.collectAsStateWithLifecycle()
     val unavailableSourceIds by sourceViewModel.unavailableSourceIds.collectAsStateWithLifecycle()
+    val apocryphaSuggestion by sourceViewModel.apocryphaSuggestion.collectAsStateWithLifecycle()
 
     var showListDialog by remember { mutableStateOf(false) }
     var editingList by remember { mutableStateOf<com.Bible3650.www.data.local.ReadingListEntity?>(null) }
@@ -145,6 +146,32 @@ fun ManageListsScreen(
         sourceViewModel.uiEvents.collect { message ->
             snackbarHostState.showSnackbar(message)
         }
+    }
+
+    if (apocryphaSuggestion.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { sourceViewModel.dismissApocryphaSuggestion() },
+            title = { Text(stringResource(R.string.apocrypha_detected_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.apocrypha_detected_message,
+                        apocryphaSuggestion.size,
+                        apocryphaSuggestion.joinToString(", ")
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { sourceViewModel.createOrUpdateApocryphaList() }) {
+                    Text(stringResource(R.string.apocrypha_create_list))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { sourceViewModel.dismissApocryphaSuggestion() }) {
+                    Text(stringResource(R.string.action_not_now))
+                }
+            }
+        )
     }
 
     Scaffold(
