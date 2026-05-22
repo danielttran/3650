@@ -25,13 +25,23 @@ android {
     }
 
     signingConfigs {
-        // TODO: Configure a proper release keystore before publishing to Google Play
-        // release {
-        //     storeFile = file("your-release-key.jks")
-        //     storePassword = "..."
-        //     keyAlias = "..."
-        //     keyPassword = "..."
-        // }
+        create("release") {
+            // Credentials come from environment variables or Gradle properties (e.g. in
+            // ~/.gradle/gradle.properties) and are never committed. When they are absent,
+            // storeFile stays null and release builds remain unsigned so local/CI builds
+            // still succeed.
+            val storeFilePath = System.getenv("RELEASE_STORE_FILE")
+                ?: (project.findProperty("RELEASE_STORE_FILE") as String?)
+            if (storeFilePath != null) {
+                storeFile = file(storeFilePath)
+                storePassword = System.getenv("RELEASE_STORE_PASSWORD")
+                    ?: (project.findProperty("RELEASE_STORE_PASSWORD") as String?)
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                    ?: (project.findProperty("RELEASE_KEY_ALIAS") as String?)
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+                    ?: (project.findProperty("RELEASE_KEY_PASSWORD") as String?)
+            }
+        }
     }
 
     buildTypes {
@@ -40,7 +50,14 @@ android {
             // stripped via the rule in proguard-rules.pro. This also shrinks the APK.
             isMinifyEnabled = true
 
-            // signingConfig = signingConfigs.getByName("release")   // Enable after configuring release keystore above
+            // Sign only when release keystore credentials are configured; otherwise the
+            // release build is produced unsigned (ready to sign later for Play upload).
+            val hasReleaseSigning = System.getenv("RELEASE_STORE_FILE") != null ||
+                project.hasProperty("RELEASE_STORE_FILE")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
