@@ -82,6 +82,9 @@ class AudioControllerManager @Inject constructor(
     private val _sleepTimer = MutableStateFlow<SleepTimer>(SleepTimer.Off)
     val sleepTimer: StateFlow<SleepTimer> = _sleepTimer
     private var sleepTimerJob: Job? = null
+    // Bumped on every sleep-timer change so a previously-scheduled countdown that has
+    // already passed its delay cannot clobber a newer timer's state.
+    private var sleepTimerGeneration = 0
 
     // #13: Expose playback errors (e.g. unresolvable audio URI) so the UI can show a snackbar.
     private val _playerError = MutableSharedFlow<String>(extraBufferCapacity = 1)
@@ -219,6 +222,10 @@ class AudioControllerManager @Inject constructor(
                                 }
                             }
                         prefs.edit().remove(KEY_MEDIA_ID).remove(KEY_POSITION).apply()
+                        // Playback finished; disarm an end-of-chapter sleep timer.
+                        if (_sleepTimer.value is SleepTimer.EndOfChapter) {
+                            _sleepTimer.value = SleepTimer.Off
+                        }
                     }
                 }
 
@@ -379,35 +386,40 @@ class AudioControllerManager @Inject constructor(
         prefs.edit().putFloat(KEY_SPEED, clamped).apply()
     }
 
-    /** Arm a countdown sleep timer; [minutes] <= 0 cancels it. */
-    fun setSleepTimerMinutes(minutes: Int) {
+    // Cancels any running countdown and advances the generation; returns the new generation.
+    private fun beginSleepTimerChange(): Int {
         sleepTimerJob?.cancel()
         sleepTimerJob = null
+        return ++sleepTimerGeneration
+    }
+
+    /** Arm a countdown sleep timer; [minutes] <= 0 cancels it. */
+    fun setSleepTimerMinutes(minutes: Int) {
+        beginSleepTimerChange()
         if (minutes <= 0) {
             _sleepTimer.value = SleepTimer.Off
             return
         }
+        val gen = sleepTimerGeneration
         val end = android.os.SystemClock.elapsedRealtime() + minutes * 60_000L
         _sleepTimer.value = SleepTimer.Timed(end)
         sleepTimerJob = scope.launch {
             val remaining = end - android.os.SystemClock.elapsedRealtime()
             if (remaining > 0) delay(remaining)
+            if (gen != sleepTimerGeneration) return@launch  // superseded by a newer change
             _player.value?.pause()
             _sleepTimer.value = SleepTimer.Off
-            sleepTimerJob = null
         }
     }
 
     /** Pause automatically once the current chapter finishes. */
     fun setSleepTimerEndOfChapter() {
-        sleepTimerJob?.cancel()
-        sleepTimerJob = null
+        beginSleepTimerChange()
         _sleepTimer.value = SleepTimer.EndOfChapter
     }
 
     fun cancelSleepTimer() {
-        sleepTimerJob?.cancel()
-        sleepTimerJob = null
+        beginSleepTimerChange()
         _sleepTimer.value = SleepTimer.Off
     }
 
@@ -418,6 +430,7 @@ class AudioControllerManager @Inject constructor(
         positionUpdateJob = null
         sleepTimerJob?.cancel()
         sleepTimerJob = null
+        sleepTimerGeneration++
         _sleepTimer.value = SleepTimer.Off
         _isPlaying.value = false
         // Clear playback state so the UI doesn't show stale "Now Playing" after
