@@ -458,10 +458,8 @@ class BibleRepository @Inject constructor(
                     cache?.put(cacheKey, empty)
                     empty
                 } else {
-                    val sorted = files
-                        .map { it.second to tokenize(it.first) }
-                        .sortedWith { a, b -> compareTokens(a.second, b.second) }
-                        .map { it.first }
+                    // Natural numeric ordering so "Chapter 10" follows "Chapter 9".
+                    val sorted = NaturalFileSort.sortedDocIds(files)
                     // LruCache automatically evicts oldest entries when exceeding max size
                     cache?.put(cacheKey, sorted)
                     sorted
@@ -486,35 +484,4 @@ class BibleRepository @Inject constructor(
         endsWith(".m4a",  ignoreCase = true) ||
         endsWith(".ogg",  ignoreCase = true) ||
         endsWith(".flac", ignoreCase = true)
-
-    private fun compareTokens(aToks: List<Pair<Boolean, String>>, bToks: List<Pair<Boolean, String>>): Int {
-        for (i in 0 until minOf(aToks.size, bToks.size)) {
-            val (aNum, aStr) = aToks[i]; val (bNum, bStr) = bToks[i]
-            val cmp = if (aNum && bNum) {
-                val aLong = aStr.toLongOrNull() ?: Long.MAX_VALUE
-                val bLong = bStr.toLongOrNull() ?: Long.MAX_VALUE
-                aLong.compareTo(bLong)
-            } else {
-                aStr.compareTo(bStr, ignoreCase = true)
-            }
-            if (cmp != 0) return cmp
-        }
-        return aToks.size.compareTo(bToks.size)
-    }
-
-    private fun tokenize(s: String): List<Pair<Boolean, String>> {
-        val result = mutableListOf<Pair<Boolean, String>>()
-        var i = 0
-        while (i < s.length) {
-            val start = i
-            if (s[i].isDigit()) {
-                while (i < s.length && s[i].isDigit()) i++
-                result.add(true to s.substring(start, i))
-            } else {
-                while (i < s.length && !s[i].isDigit()) i++
-                result.add(false to s.substring(start, i))
-            }
-        }
-        return result
-    }
 }
