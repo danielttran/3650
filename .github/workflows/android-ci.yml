@@ -47,9 +47,13 @@ jobs:
           {
             echo "### Android CI build failed"
             echo ""
-            echo "Last 250 lines of build output:"
+            echo "#### Kotlin compiler diagnostics (e:/w: lines)"
             echo '```'
-            tail -n 250 build-output.txt
+            grep -nE "^(e|w): " build-output.txt | head -n 150 || echo "(none)"
+            echo '```'
+            echo "#### Failure summary"
+            echo '```'
+            grep -nE "FAILURE:|FAILED|What went wrong|Compilation error|Unresolved reference|error:" build-output.txt | head -n 60 || echo "(none)"
             echo '```'
           } > comment.md
           gh pr comment ${{ github.event.pull_request.number }} --body-file comment.md
