@@ -1,3 +1,11 @@
+import java.io.File
+
+val sqliteTmpDir = File(rootDir, "sqlite_tmp")
+if (!sqliteTmpDir.exists()) {
+    sqliteTmpDir.mkdirs()
+}
+System.setProperty("org.sqlite.tmpdir", sqliteTmpDir.absolutePath)
+
 pluginManagement {
     repositories {
         google {

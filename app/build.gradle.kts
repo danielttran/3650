@@ -50,13 +50,8 @@ android {
             // stripped via the rule in proguard-rules.pro. This also shrinks the APK.
             isMinifyEnabled = true
 
-            // Sign only when release keystore credentials are configured; otherwise the
-            // release build is produced unsigned (ready to sign later for Play upload).
-            val hasReleaseSigning = System.getenv("RELEASE_STORE_FILE") != null ||
-                project.hasProperty("RELEASE_STORE_FILE")
-            if (hasReleaseSigning) {
-                signingConfig = signingConfigs.getByName("release")
-            }
+            // For testing the release build on a device, we sign it with the debug key.
+            signingConfig = signingConfigs.getByName("debug")
 
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
