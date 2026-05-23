@@ -6,7 +6,9 @@ import com.Bible3650.www.data.local.BibleTextDao
 import com.Bible3650.www.data.local.BibleTextEntity
 import com.Bible3650.www.data.local.BibleTranslationEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -83,7 +85,9 @@ class BibleTextDownloader @Inject constructor(
                 onProgress(0, 1)
                 val content = http.get(entry.url)
                 val fmt = runCatching { TextFormat.valueOf(entry.format.uppercase()) }.getOrDefault(TextFormat.UNKNOWN)
-                BibleTextImporter.parse(content, fmt).also { onProgress(1, 1) }
+                // Parsing a whole-Bible document (helloao bulk files are several MB) is CPU-heavy;
+                // keep it off the caller's thread so a download can never block the UI / cause an ANR.
+                withContext(Dispatchers.IO) { BibleTextImporter.parse(content, fmt) }.also { onProgress(1, 1) }
             }
             "PASSAGE_API" -> {
                 val books = BibleRegistry.getAllBooks()

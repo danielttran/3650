@@ -17,6 +17,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Locale
@@ -51,23 +52,49 @@ class TtsSynthesizer @Inject constructor(
     // Counts in-flight syntheses so overlapping calls don't clear the flag prematurely.
     private val synthInFlight = AtomicInteger(0)
 
+    // Human-readable reason the most recent synthesis attempt produced no audio, so the UI can
+    // tell the user (and us) WHICH stage failed: missing voice data vs engine reject vs no
+    // callback vs missing chapter text. Set on each failure path; cleared when an attempt starts.
+    @Volatile
+    var lastFailureReason: String? = null
+        private set
+
     private suspend fun ensureReady(): Boolean = initMutex.withLock {
         if (ready) return true
+        // Dispose any engine left over from a prior failed init so retries don't leak engines.
+        tts?.shutdown()
+        tts = null
         val ok = suspendCancellableCoroutine { cont ->
             var engine: TextToSpeech? = null
             engine = TextToSpeech(context) { status ->
-                val success = status == TextToSpeech.SUCCESS
-                if (success) {
+                var usable = status == TextToSpeech.SUCCESS
+                if (!usable) {
+                    lastFailureReason = "Text-to-speech engine failed to start on this device."
+                } else {
                     val e = engine
-                    val res = e?.setLanguage(Locale.getDefault())
+                    // Probe for installed voice data: if neither the device default nor US has
+                    // it, the engine still ACCEPTS synthesizeToFile but never fires onDone — a
+                    // silent hang. Treat "no voice data" as not-ready so callers fail fast with
+                    // an actionable message instead of spinning on "Synthesizing…" forever.
+                    val resDefault = e?.setLanguage(Locale.getDefault()) ?: TextToSpeech.LANG_NOT_SUPPORTED
+                    var res = resDefault
+                    var resUs: Int? = null
                     if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
-                        e.setLanguage(Locale.US)
+                        resUs = e?.setLanguage(Locale.US) ?: TextToSpeech.LANG_NOT_SUPPORTED
+                        res = resUs
                     }
-                    voiceTag = (e?.voice?.name ?: e?.defaultEngine ?: "default")
-                        .replace(Regex("[^A-Za-z0-9]"), "")
-                        .ifBlank { "default" }
+                    if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        usable = false
+                        lastFailureReason = "No text-to-speech voice is installed " +
+                            "(default=${langName(resDefault)}, us=${langName(resUs ?: resDefault)}). " +
+                            "Install a voice in your device's Text-to-speech settings."
+                    } else {
+                        voiceTag = (e?.voice?.name ?: e?.defaultEngine ?: "default")
+                            .replace(Regex("[^A-Za-z0-9]"), "")
+                            .ifBlank { "default" }
+                    }
                 }
-                if (cont.isActive) cont.resume(success)
+                if (cont.isActive) cont.resume(usable)
             }
             tts = engine
             engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -91,7 +118,8 @@ class TtsSynthesizer @Inject constructor(
                 outFile.setLastModified(System.currentTimeMillis())
                 return@withContext outFile.toUri()
             }
-            if (!ensureReady()) return@withContext null
+            lastFailureReason = null
+            if (!ensureReady()) return@withContext null  // ensureReady set lastFailureReason
             // Re-evaluate the name after init (voiceTag may have changed) and re-check cache.
             val finalFile = File(cacheDir, cacheFileName(translationId, book, chapter, voiceTag))
             if (finalFile.isFile && finalFile.length() > WAV_HEADER) {
@@ -99,7 +127,10 @@ class TtsSynthesizer @Inject constructor(
                 return@withContext finalFile.toUri()
             }
             val text = textDao.getChapter(translationId, book, chapter)?.text?.takeIf { it.isNotBlank() }
-                ?: return@withContext null
+                ?: run {
+                    lastFailureReason = "This chapter has no stored text in this translation."
+                    return@withContext null
+                }
 
             _isSynthesizing.value = synthInFlight.incrementAndGet() > 0
             try {
@@ -142,13 +173,38 @@ class TtsSynthesizer @Inject constructor(
         val id = "u" + utteranceCounter.incrementAndGet()
         val deferred = CompletableDeferred<Boolean>()
         pending[id] = deferred
-        val params = Bundle()
+        // Some engines only fire onDone/onError when the utterance id is ALSO in the params
+        // Bundle (legacy KEY_PARAM_UTTERANCE_ID), even though the id arg is passed below. Without
+        // it those engines synthesize but never call back, so the await would always time out.
+        val params = Bundle().apply {
+            putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, id)
+        }
         val result = engine.synthesizeToFile(text, params, file, id)
         if (result != TextToSpeech.SUCCESS) {
             pending.remove(id)
+            lastFailureReason = "Text-to-speech engine rejected the request (code $result)."
             return false
         }
-        return deferred.await()
+        // Defense-in-depth: some engines accept the request (SUCCESS) yet never fire onDone/
+        // onError. Without a timeout that await would hang forever, stranding "Synthesizing…".
+        val done = withTimeoutOrNull(SYNTH_TIMEOUT_MS) { deferred.await() }
+        if (done == null) {
+            pending.remove(id)
+            lastFailureReason = "Text-to-speech engine didn't respond. Try selecting a different " +
+                "engine in your device's Text-to-speech settings."
+            return false
+        }
+        if (!done) lastFailureReason = "Text-to-speech engine reported an error while synthesizing."
+        return done
+    }
+
+    private fun langName(code: Int): String = when (code) {
+        TextToSpeech.LANG_MISSING_DATA -> "MISSING_DATA"
+        TextToSpeech.LANG_NOT_SUPPORTED -> "NOT_SUPPORTED"
+        TextToSpeech.LANG_AVAILABLE -> "AVAILABLE"
+        TextToSpeech.LANG_COUNTRY_AVAILABLE -> "COUNTRY_AVAILABLE"
+        TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE -> "COUNTRY_VAR_AVAILABLE"
+        else -> "code $code"
     }
 
     private fun evictIfOverCap() {
@@ -164,6 +220,7 @@ class TtsSynthesizer @Inject constructor(
 
     companion object {
         const val MAX_CHARS = 3500          // under TextToSpeech.getMaxSpeechInputLength() (~4000)
+        private const val SYNTH_TIMEOUT_MS = 45_000L  // generous; a real chunk synthesizes in 1–5s
         private const val WAV_HEADER = 44L
         private const val MAX_CACHE_BYTES = 250L * 1024 * 1024
 

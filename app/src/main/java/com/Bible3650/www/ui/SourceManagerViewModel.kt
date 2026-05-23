@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,14 +40,6 @@ sealed interface DetectionState {
     object Running : DetectionState
     data class Done(val sourceId: Long) : DetectionState
     data class Error(val message: String) : DetectionState
-}
-
-/** Progress of a text-Bible download or import. */
-sealed interface TextOpState {
-    object Idle : TextOpState
-    object Running : TextOpState
-    data class Progress(val done: Int, val total: Int) : TextOpState
-    data class Error(val message: String) : TextOpState
 }
 
 @HiltViewModel
@@ -76,12 +69,36 @@ class SourceManagerViewModel @Inject constructor(
     private val _apocryphaSuggestion = MutableStateFlow<List<String>>(emptyList())
     val apocryphaSuggestion: StateFlow<List<String>> = _apocryphaSuggestion
 
-    // Text-Bible (TTS) catalog + download/import progress.
+    // Text-Bible (TTS) catalog.
     private val _catalog = MutableStateFlow<List<CatalogEntry>>(emptyList())
     val catalog: StateFlow<List<CatalogEntry>> = _catalog
 
-    private val _textOpState = MutableStateFlow<TextOpState>(TextOpState.Idle)
-    val textOpState: StateFlow<TextOpState> = _textOpState
+    // The catalog entry id currently downloading (or IMPORT_ID for a file import), else null.
+    // Only one text operation runs at a time; the dialog stays on the catalog list throughout.
+    private val _downloadingId = MutableStateFlow<String?>(null)
+    val downloadingId: StateFlow<String?> = _downloadingId
+
+    // Last download/import failure, shown inline in the dialog (a snackbar would sit behind it).
+    private val _textOpError = MutableStateFlow<String?>(null)
+    val textOpError: StateFlow<String?> = _textOpError
+
+    // Catalog entry ids that are already installed (a DOWNLOAD-origin translation with that
+    // abbrev exists). Drives the per-row Download → Delete toggle and blocks duplicates.
+    val downloadedEntryIds: StateFlow<Set<String>> =
+        combine(textDao.observeTranslations(), _catalog) { translations, catalog ->
+            val installed = translations.filter { it.origin == "DOWNLOAD" }.map { it.abbrev }.toSet()
+            catalog.filter { it.abbrev in installed }.map { it.id }.toSet()
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    // Catalog entry id whose translation is the active source, so the row can show Active / Use.
+    val activeTextEntryId: StateFlow<String?> =
+        combine(sources, textDao.observeTranslations(), _catalog) { srcs, translations, catalog ->
+            val active = srcs.firstOrNull { it.source.isActive && it.source.sourceType == "TEXT" }
+                ?: return@combine null
+            val abbrev = translations.firstOrNull { it.translationId == active.source.translationId }?.abbrev
+                ?: return@combine null
+            catalog.firstOrNull { it.abbrev == abbrev }?.id
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     /** Re-checks whether each source's root folder is still accessible. */
     fun refreshSourceHealth() {
@@ -267,31 +284,61 @@ class SourceManagerViewModel @Inject constructor(
         }
     }
 
-    fun resetTextOpState() {
-        _textOpState.value = TextOpState.Idle
+    /** Clears a previous download/import error so a reopened dialog starts clean. */
+    fun clearTextOpError() {
+        _textOpError.value = null
     }
 
     /** Downloads a catalog translation into the text store and adds it as a TEXT source. */
     fun downloadTranslation(entry: CatalogEntry) {
-        viewModelScope.launch {
-            _textOpState.value = TextOpState.Running
+        if (_downloadingId.value != null) return            // one text op at a time
+        _textOpError.value = null
+        _downloadingId.value = entry.id                     // set on the caller thread to block re-entry
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                val translationId = downloader.download(entry) { done, total ->
-                    _textOpState.value = TextOpState.Progress(done, total)
+                // Idempotent: never download a translation that is already installed (#2).
+                val exists = textDao.getTranslations().any { it.origin == "DOWNLOAD" && it.abbrev == entry.abbrev }
+                if (!exists) {
+                    val translationId = downloader.download(entry)
+                    createTextSource(translationId, entry.name)
                 }
-                createTextSource(translationId, entry.name)
-                _textOpState.value = TextOpState.Idle
             } catch (e: Exception) {
                 android.util.Log.e("SourceManager", "Text download failed", e)
-                _textOpState.value = TextOpState.Error(e.localizedMessage ?: "Download failed")
+                _textOpError.value = "Couldn't download ${entry.name}: ${e.localizedMessage ?: "download failed"}"
+            } finally {
+                _downloadingId.value = null
             }
+        }
+    }
+
+    /** Deletes an installed catalog translation (its TEXT source + stored text). */
+    fun deleteDownloadedTranslation(entry: CatalogEntry) {
+        viewModelScope.launch {
+            val source = withContext(Dispatchers.IO) {
+                val t = textDao.getTranslations().firstOrNull { it.origin == "DOWNLOAD" && it.abbrev == entry.abbrev }
+                t?.let { tr -> dao.getAllSources().firstOrNull { it.source.translationId == tr.translationId }?.source }
+            } ?: return@launch
+            deleteSource(source)
+        }
+    }
+
+    /** Activates the installed translation for [entry] so playback reads it aloud. */
+    fun useDownloadedTranslation(entry: CatalogEntry) {
+        viewModelScope.launch {
+            val source = withContext(Dispatchers.IO) {
+                val t = textDao.getTranslations().firstOrNull { it.origin == "DOWNLOAD" && it.abbrev == entry.abbrev }
+                t?.let { tr -> dao.getAllSources().firstOrNull { it.source.translationId == tr.translationId }?.source }
+            } ?: return@launch
+            switchSource(source)
         }
     }
 
     /** Imports a user-supplied text file (any supported format) as a TEXT source. */
     fun importText(uri: Uri, displayName: String) {
+        if (_downloadingId.value != null) return
+        _textOpError.value = null
+        _downloadingId.value = IMPORT_ID
         viewModelScope.launch {
-            _textOpState.value = TextOpState.Running
             try {
                 val translationId = withContext(Dispatchers.IO) {
                     val content = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
@@ -314,10 +361,11 @@ class SourceManagerViewModel @Inject constructor(
                     tid
                 }
                 createTextSource(translationId, displayName)
-                _textOpState.value = TextOpState.Idle
             } catch (e: Exception) {
                 android.util.Log.e("SourceManager", "Text import failed", e)
-                _textOpState.value = TextOpState.Error(e.localizedMessage ?: "Import failed")
+                _textOpError.value = "Import failed: ${e.localizedMessage ?: "could not read file"}"
+            } finally {
+                _downloadingId.value = null
             }
         }
     }
@@ -377,7 +425,9 @@ class SourceManagerViewModel @Inject constructor(
         }
     }
 
-    private companion object {
-        const val APOCRYPHA_LIST_NAME = "Apocrypha"
+    companion object {
+        private const val APOCRYPHA_LIST_NAME = "Apocrypha"
+        /** Sentinel [downloadingId] value used while a user file import is in progress. */
+        const val IMPORT_ID = "::import::"
     }
 }

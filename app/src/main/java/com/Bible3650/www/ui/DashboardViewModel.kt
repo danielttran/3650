@@ -68,8 +68,8 @@ class DashboardViewModel @Inject constructor(
         repository.dailyTasksFlow,
         repository.hasActiveSourceFlow
     ) { tasks, hasSource ->
-        // hasActiveSourceFlow shares the same Room query already used by dailyTasksFlow,
-        // so we avoid a duplicate subscription to observeActiveMappings().
+        // hasActiveSourceFlow is true for an active TEXT source or an AUDIO source with
+        // mappings; otherwise the home screen shows the "add a source" empty state.
         if (!hasSource) return@combine DashboardUiState.NoSource
 
         val mappedTasks = tasks.map { task ->

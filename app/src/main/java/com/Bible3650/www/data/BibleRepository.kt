@@ -12,6 +12,7 @@ import com.Bible3650.www.data.local.BookMappingEntity
 import com.Bible3650.www.data.local.DailyTask
 import com.Bible3650.www.data.local.ListWithBooks
 import com.Bible3650.www.data.local.ReadingListEntity
+import com.Bible3650.www.data.local.SourceWithMappings
 import com.Bible3650.www.domain.DefaultsProvider
 import com.Bible3650.www.domain.PresetPlan
 import com.Bible3650.www.domain.ReadingPlanUseCase
@@ -34,6 +35,16 @@ import androidx.room.withTransaction
 import com.Bible3650.www.data.local.AppDatabase
 
 private const val MAX_FOLDER_CACHE_ENTRIES = 100
+
+/**
+ * Whether the currently active source can drive the home screen. A TEXT source is usable on
+ * its own (it carries a stored translation); an AUDIO source needs at least one book mapping.
+ * Pure function so the home-screen gating logic is unit-testable without Room.
+ */
+internal fun activeSourceUsable(sources: List<SourceWithMappings>): Boolean {
+    val active = sources.firstOrNull { it.source.isActive } ?: return false
+    return active.source.sourceType == "TEXT" || active.mappings.isNotEmpty()
+}
 
 // Current backup schema version. Checked on import to guard against stale backups.
 private const val BACKUP_VERSION_CURRENT = 1
@@ -73,9 +84,14 @@ class BibleRepository @Inject constructor(
     // compare-and-set atomicity, so TOCTOU is possible under concurrent callers).
     private val frozenOnce = AtomicBoolean(false)
 
-    /** Emits true when at least one audio source mapping is active. */
+    /**
+     * Emits true when the active source is usable: a TEXT (TTS) source — which has a stored
+     * translation rather than folder mappings — or an AUDIO source with at least one book
+     * mapping. Driving this off mappings alone hid the home screen whenever a text Bible was
+     * the active source (text sources never create book_mappings).
+     */
     val hasActiveSourceFlow: Flow<Boolean> =
-        audioSourceDao.observeActiveMappings().map { it.isNotEmpty() }
+        audioSourceDao.observeAllSources().map(::activeSourceUsable)
 
     // #15: Expose raw list-with-books data for screens that need full entity access
     // (ManageListsScreen, ProfileScreen) without leaking the DAO itself.

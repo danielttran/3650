@@ -92,9 +92,8 @@
     <string name="text_source_subtitle">Text — read aloud with text-to-speech</string>
     <string name="badge_text">Text</string>
     <string name="text_bible_dialog_desc">Download a public-domain translation, or import your own file (JSON, USFM, OSIS, or Zefania XML). Copyrighted translations can only be imported from a copy you own.</string>
-    <string name="text_op_preparing">Working…</string>
-    <string name="text_op_downloading">Downloading… this may take a moment</string>
-    <string name="text_op_progress">Downloading… %1$d / %2$d chapters</string>
+    <string name="text_status_downloading">Downloading…</string>
+    <string name="text_status_importing">Importing…</string>
     <string name="action_download">Download</string>
     <string name="action_import_file">Import file</string>
     <string name="action_close">Close</string>

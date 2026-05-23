@@ -65,6 +65,7 @@ fun HomeScreen(
                 var showFullPlayer by rememberSaveable { mutableStateOf(false) }
                 var jumpTarget by remember { mutableStateOf<TaskUiModel?>(null) }
                 val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
+                val isSynthesizing by viewModel.isSynthesizing.collectAsStateWithLifecycle()
                 val playingTask = remember(uiState.tasks, currentMediaId) {
                     uiState.tasks.find { it.id == currentMediaId }
                 }
@@ -147,6 +148,32 @@ fun HomeScreen(
                             onExpand = { showFullPlayer = true },
                             modifier = Modifier.align(Alignment.BottomCenter)
                         )
+
+                        // For text Bibles, the first chapter takes a moment to render to audio
+                        // before the player (and mini-player) come up. Show immediate feedback
+                        // so tapping a chapter doesn't look like nothing happened.
+                        if (playingTask == null && isSynthesizing) {
+                            Surface(
+                                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                tonalElevation = 8.dp,
+                                shadowElevation = 16.dp,
+                                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(20.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(16.dp))
+                                    Text(
+                                        stringResource(R.string.synthesizing),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 

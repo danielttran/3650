@@ -78,9 +78,11 @@ fun Bible3650App(dashboardViewModel: DashboardViewModel) {
         dashboardViewModel.uiEvents.collect { event ->
             when (event) {
                 is DashboardUiEvent.ShowSnackbar -> {
+                    // These are playback/synthesis errors — give the user time to read the
+                    // (sometimes detailed) reason rather than flashing it for ~2 seconds.
                     snackbarHostState.showSnackbar(
                         message = event.message,
-                        duration = SnackbarDuration.Short
+                        duration = SnackbarDuration.Long
                     )
                 }
             }

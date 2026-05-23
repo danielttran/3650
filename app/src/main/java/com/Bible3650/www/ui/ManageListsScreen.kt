@@ -6,6 +6,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -67,7 +69,10 @@ fun ManageListsScreen(
     val unavailableSourceIds by sourceViewModel.unavailableSourceIds.collectAsStateWithLifecycle()
     val apocryphaSuggestion by sourceViewModel.apocryphaSuggestion.collectAsStateWithLifecycle()
     val catalog by sourceViewModel.catalog.collectAsStateWithLifecycle()
-    val textOpState by sourceViewModel.textOpState.collectAsStateWithLifecycle()
+    val downloadingId by sourceViewModel.downloadingId.collectAsStateWithLifecycle()
+    val downloadedEntryIds by sourceViewModel.downloadedEntryIds.collectAsStateWithLifecycle()
+    val activeTextEntryId by sourceViewModel.activeTextEntryId.collectAsStateWithLifecycle()
+    val textOpError by sourceViewModel.textOpError.collectAsStateWithLifecycle()
     var showTextBibleDialog by remember { mutableStateOf(false) }
 
     var showListDialog by remember { mutableStateOf(false) }
@@ -142,7 +147,6 @@ fun ManageListsScreen(
                 android.util.Log.w("ManageLists", "No persistable permission for imported text", e)
             }
             sourceViewModel.importText(uri, suggestedNameFor(uri))
-            showTextBibleDialog = false
         }
     }
 
@@ -192,61 +196,78 @@ fun ManageListsScreen(
     }
 
     if (showTextBibleDialog) {
-        val op = textOpState
+        val busy = downloadingId != null
         AlertDialog(
-            onDismissRequest = {
-                if (op !is TextOpState.Running && op !is TextOpState.Progress) {
-                    showTextBibleDialog = false
-                    sourceViewModel.resetTextOpState()
-                }
-            },
+            onDismissRequest = { showTextBibleDialog = false },
             title = { Text(stringResource(R.string.add_text_bible)) },
             text = {
-                Column {
+                // The catalog list stays visible throughout — each row carries its own state
+                // (Download / Downloading… / Delete) so a download never hides the other choices.
+                // Cap height + scroll so the list never clips on small screens.
+                Column(modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
                     Text(stringResource(R.string.text_bible_dialog_desc), style = MaterialTheme.typography.bodyMedium)
+                    textOpError?.let { err ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(err, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
                     Spacer(Modifier.height(12.dp))
-                    when (op) {
-                        is TextOpState.Running -> Text(stringResource(R.string.text_op_preparing), style = MaterialTheme.typography.bodySmall)
-                        is TextOpState.Progress -> Text(
-                            // BULK_FILE downloads report a single (0/1 → 1/1) step; show a plain
-                            // "Downloading…" rather than a confusing "0 / 1 chapters".
-                            if (op.total <= 1) stringResource(R.string.text_op_downloading)
-                            else stringResource(R.string.text_op_progress, op.done, op.total),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        is TextOpState.Error -> Text(op.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                        TextOpState.Idle -> {
-                            catalog.forEach { entry ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(entry.name, style = MaterialTheme.typography.titleSmall)
-                                        entry.attribution?.let {
-                                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    catalog.forEach { entry ->
+                        val isDownloading = downloadingId == entry.id
+                        val isDownloaded = entry.id in downloadedEntryIds
+                        val isActive = activeTextEntryId == entry.id
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(entry.name, style = MaterialTheme.typography.titleSmall)
+                                entry.attribution?.let {
+                                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                            when {
+                                isDownloading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(stringResource(R.string.text_status_downloading), style = MaterialTheme.typography.labelMedium)
+                                }
+                                isDownloaded -> Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (isActive) {
+                                        Badge { Text(stringResource(R.string.active)) }
+                                    } else {
+                                        TextButton(onClick = { sourceViewModel.useDownloadedTranslation(entry) }, enabled = !busy) {
+                                            Text(stringResource(R.string.action_use))
                                         }
                                     }
-                                    TextButton(onClick = { sourceViewModel.downloadTranslation(entry) }) {
-                                        Text(stringResource(R.string.action_download))
+                                    TextButton(onClick = { sourceViewModel.deleteDownloadedTranslation(entry) }, enabled = !busy) {
+                                        Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error)
                                     }
+                                }
+                                else -> TextButton(onClick = { sourceViewModel.downloadTranslation(entry) }, enabled = !busy) {
+                                    Text(stringResource(R.string.action_download))
                                 }
                             }
                         }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                     }
                 }
             },
             confirmButton = {
                 TextButton(
                     onClick = { importTextLauncher.launch(arrayOf("application/json", "text/*", "application/xml", "*/*")) },
-                    enabled = op !is TextOpState.Running && op !is TextOpState.Progress
-                ) { Text(stringResource(R.string.action_import_file)) }
+                    enabled = !busy
+                ) {
+                    if (downloadingId == com.Bible3650.www.ui.SourceManagerViewModel.IMPORT_ID) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.text_status_importing))
+                    } else {
+                        Text(stringResource(R.string.action_import_file))
+                    }
+                }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    showTextBibleDialog = false
-                    sourceViewModel.resetTextOpState()
-                }) { Text(stringResource(R.string.action_close)) }
+                TextButton(onClick = { showTextBibleDialog = false }) { Text(stringResource(R.string.action_close)) }
             }
         )
     }
@@ -440,6 +461,7 @@ fun ManageListsScreen(
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = {
+                        sourceViewModel.clearTextOpError()
                         sourceViewModel.loadCatalog()
                         showTextBibleDialog = true
                     },

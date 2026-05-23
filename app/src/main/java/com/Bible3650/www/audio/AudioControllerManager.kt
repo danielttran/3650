@@ -8,6 +8,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.Bible3650.www.data.BibleRepository
+import com.Bible3650.www.data.local.AudioSourceEntity
 import com.Bible3650.www.data.local.DailyTask
 import com.google.common.util.concurrent.ListenableFuture
 import androidx.core.content.ContextCompat
@@ -21,8 +22,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -45,6 +48,15 @@ const val MAX_PLAYBACK_SPEED = 3.0f
 
 // Separator in uniqueId format "listId_dayOffset_book_chapter"; listId is the first segment.
 private const val TASK_ID_SEPARATOR = "_"
+
+/**
+ * Identity of the source a player playlist was built for. Task uniqueIds are source-agnostic
+ * ("listId_day_book_chapter"), so the playlist fast-path keys off this to avoid replaying a
+ * stale AUDIO playlist for a TEXT (TTS) source — or a different translation. Top-level + pure
+ * so the discrimination is unit-testable without a MediaController.
+ */
+internal fun playlistSourceKey(source: AudioSourceEntity?): String =
+    if (source == null) "none" else "${source.sourceId}:${source.sourceType}:${source.translationId ?: -1L}"
 
 /** State of the optional sleep timer that auto-pauses playback. */
 sealed interface SleepTimer {
@@ -110,6 +122,35 @@ class AudioControllerManager @Inject constructor(
         _playbackSpeed.value = prefs.getFloat(KEY_SPEED, 1.0f)
             .coerceIn(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED)
         initializeController()
+        observeActiveSourceForStalePlaylist()
+    }
+
+    // When the active source changes away from whatever playlist is currently loaded, drop the
+    // stale media. Task uniqueIds are source-agnostic, so without this the loaded recordings
+    // would keep playing (via the resume button / togglePlayPause) after switching to a TEXT
+    // (TTS) source — or after deleting the audio source and linking a text Bible.
+    private fun observeActiveSourceForStalePlaylist() {
+        scope.launch(ioDispatcher) {
+            repository.audioSourceDao.observeAllSources()
+                .map { sources -> playlistSourceKey(sources.firstOrNull { it.source.isActive }?.source) }
+                .distinctUntilChanged()
+                .collect { newKey ->
+                    withContext(mainDispatcher) {
+                        val loaded = currentPlaylistSourceKey
+                        if (loaded != null && loaded != newKey) {
+                            // Invariant: do NOT bump currentPlaylistRequestId here. A concurrent
+                            // switchSource → resumeFromSnapshot rebuild is in flight using the
+                            // current requestId; bumping it would cancel that rebuild and leave
+                            // the player empty after a source switch.
+                            _player.value?.let { it.stop(); it.clearMediaItems() }
+                            currentPlaylistSourceKey = null
+                            _currentMediaId.value = null
+                            _currentPosition.value = 0L
+                            _duration.value = 0L
+                        }
+                    }
+                }
+        }
     }
 
     private fun savePosition(p: Player) {
@@ -245,6 +286,12 @@ class AudioControllerManager @Inject constructor(
 
     private var currentPlaylistRequestId: Long = 0
 
+    // Identifies which source the currently-loaded player playlist was built for. The
+    // playlist fast-path must not reuse media items across a source switch, because task
+    // uniqueIds ("listId_day_book_chapter") are source-agnostic — without this an AUDIO
+    // playlist would be replayed for a TEXT (TTS) source and vice versa.
+    private var currentPlaylistSourceKey: String? = null
+
     private fun computeSafeStartIndex(taskCount: Int, requestedStartIndex: Int): Int {
         return when {
             taskCount <= 0 -> androidx.media3.common.C.INDEX_UNSET
@@ -272,34 +319,35 @@ class AudioControllerManager @Inject constructor(
             return
         }
 
-        // Check if the current playlist already matches `tasks`. Skipped on forceReload so a
-        // source/translation switch re-resolves URIs even though the uniqueIds are unchanged.
-        if (!forceReload && tasks.isNotEmpty() && player.mediaItemCount == tasks.size) {
-            var isMatch = true
-            for (i in tasks.indices) {
-                if (player.getMediaItemAt(i).mediaId != tasks[i].uniqueId) {
-                    isMatch = false
-                    break
-                }
-            }
-            if (isMatch) {
-                // Playlist matches — just seek to the required index and play/pause
-                val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs else 0L
-                if (safeStartIndex != androidx.media3.common.C.INDEX_UNSET) {
-                    player.seekTo(safeStartIndex, startPos)
-                }
-                if (playWhenReady) player.play() else player.pause()
-                return
-            }
-        }
-
         val requestId = ++currentPlaylistRequestId
 
         scope.launch(ioDispatcher) {
             try {
                 val activeSource = repository.audioSourceDao.getActiveSource()
+                val sourceKey = playlistSourceKey(activeSource)
+
+                // Fast path: the same playlist is already loaded FOR THE SAME SOURCE — just
+                // seek and play. The source-key guard is essential: uniqueIds do not encode
+                // the source, so without it a stale AUDIO playlist would be replayed after a
+                // switch to a TEXT (TTS) source (and vice versa). Skipped on forceReload.
+                if (!forceReload && tasks.isNotEmpty()) {
+                    val reused = withContext(mainDispatcher) {
+                        if (requestId != currentPlaylistRequestId) return@withContext false
+                        if (sourceKey != currentPlaylistSourceKey) return@withContext false
+                        if (player.mediaItemCount != tasks.size) return@withContext false
+                        for (i in tasks.indices) {
+                            if (player.getMediaItemAt(i).mediaId != tasks[i].uniqueId) return@withContext false
+                        }
+                        val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs else 0L
+                        if (safeStartIndex != androidx.media3.common.C.INDEX_UNSET) player.seekTo(safeStartIndex, startPos)
+                        if (playWhenReady) player.play() else player.pause()
+                        true
+                    }
+                    if (reused) return@launch
+                }
+
                 if (activeSource?.sourceType == "TEXT") {
-                    playTextTasks(tasks, safeStartIndex, startPositionMs, playWhenReady, requestId, activeSource.translationId)
+                    playTextTasks(tasks, safeStartIndex, startPositionMs, playWhenReady, requestId, activeSource.translationId, sourceKey)
                     return@launch
                 }
 
@@ -340,6 +388,7 @@ class AudioControllerManager @Inject constructor(
                     player.setMediaItems(allMediaItems, safeStartIndex, startPos)
                     player.prepare()
                     if (playWhenReady) player.play() else player.pause()
+                    currentPlaylistSourceKey = sourceKey
                 }
             } catch (e: Exception) {
                 android.util.Log.e("AudioController", "Failed to play tasks", e)
@@ -363,13 +412,21 @@ class AudioControllerManager @Inject constructor(
         startPositionMs: Long,
         playWhenReady: Boolean,
         requestId: Long,
-        translationId: Long?
+        translationId: Long?,
+        sourceKey: String
     ) {
         val player = _player.value ?: return
         val startTask = tasks.getOrNull(safeStartIndex)
         val startUri = startTask?.let { ttsSynthesizer.synthesizeChapter(translationId, it.targetBook, it.targetChapter) }
         if (startUri == null) {
-            _playerError.tryEmit("Couldn't read this chapter aloud. Check the text source.")
+            // Start chapter couldn't be synthesized. Surface the specific reason (missing voice
+            // data / engine reject / no callback / missing text) and stop — don't set a broken
+            // playlist or run the prefetch, which would otherwise fail on every remaining chapter.
+            _playerError.tryEmit(
+                ttsSynthesizer.lastFailureReason
+                    ?: "Couldn't read this chapter aloud."
+            )
+            return
         }
 
         val mediaItems = tasks.mapIndexed { i, task ->
@@ -382,6 +439,7 @@ class AudioControllerManager @Inject constructor(
             player.setMediaItems(mediaItems, safeStartIndex, startPos)
             player.prepare()
             if (playWhenReady) player.play() else player.pause()
+            currentPlaylistSourceKey = sourceKey
         }
 
         // Prefetch the rest in play order (after the start, then wrap to the beginning).
@@ -523,6 +581,7 @@ class AudioControllerManager @Inject constructor(
         _currentPosition.value = 0L
         _duration.value = 0L
         _player.value = null
+        currentPlaylistSourceKey = null
         // Use releaseFuture only; it handles the case where the future is still
         // pending (cancels) and where it has resolved (releases the controller).
         // Do NOT also call mediaController.release() — that double-disposes.
