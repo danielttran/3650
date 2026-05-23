@@ -15,7 +15,7 @@ import javax.xml.parsers.DocumentBuilderFactory
 /** One parsed, cleaned chapter ready to store. [book] is a canonical [BookNameNormalizer] name. */
 data class ParsedChapter(val book: String, val chapter: Int, val text: String)
 
-enum class TextFormat { JSON, USFM, OSIS, ZEFANIA, UNKNOWN }
+enum class TextFormat { JSON, USFM, OSIS, ZEFANIA, HELLOAO, UNKNOWN }
 
 /**
  * Parses a whole-Bible (or partial) text document in any supported format into normalized,
@@ -29,6 +29,10 @@ object BibleTextImporter {
     fun sniff(content: String): TextFormat {
         val t = content.trimStart().take(4000)
         return when {
+            t.startsWith("{") && (
+                t.contains("\"completeTranslationApiLink\"") ||
+                    (t.contains("\"books\"") && t.contains("\"content\"") && t.contains("\"verse\""))
+                ) -> TextFormat.HELLOAO
             t.startsWith("{") || t.startsWith("[") -> TextFormat.JSON
             t.startsWith("<") && t.contains("osis", ignoreCase = true) -> TextFormat.OSIS
             t.startsWith("<") && (t.contains("XMLBIBLE", ignoreCase = true) || t.contains("BIBLEBOOK", ignoreCase = true)) -> TextFormat.ZEFANIA
@@ -43,6 +47,7 @@ object BibleTextImporter {
         TextFormat.USFM -> parseUsfm(content)
         TextFormat.OSIS -> parseOsis(content)
         TextFormat.ZEFANIA -> parseZefania(content)
+        TextFormat.HELLOAO -> parseHelloao(content)
         TextFormat.UNKNOWN -> emptyList()
     }
 
@@ -98,6 +103,43 @@ object BibleTextImporter {
     private fun JsonObject.int(key: String): Int? {
         val p = this[key] as? JsonPrimitive ?: return null
         return p.intOrNull ?: p.contentOrNull?.toIntOrNull()
+    }
+
+    // ---------------------------------------------------------------- helloao
+    // bible.helloao.org "complete.json": { translation, books:[ { id, name, chapters:[
+    // { chapter:{ number, content:[ {type:"verse",number,content:[ "text", {noteId},
+    // {lineBreak} ]}, {type:"heading"...}, {type:"line_break"} ] } } ] } ] }
+    private fun parseHelloao(content: String): List<ParsedChapter> {
+        val root = runCatching { json.parseToJsonElement(content) }.getOrNull() as? JsonObject ?: return emptyList()
+        val books = root["books"] as? JsonArray ?: return emptyList()
+        val acc = ChapterAccumulator()
+        for (bookEl in books) {
+            val bookObj = bookEl as? JsonObject ?: continue
+            val book = sequenceOf(bookObj.str("commonName"), bookObj.str("name"), bookObj.str("id"))
+                .mapNotNull { it?.let(BookNameNormalizer::normalize) }
+                .firstOrNull() ?: continue
+            val chapters = bookObj["chapters"] as? JsonArray ?: continue
+            for (chWrap in chapters) {
+                val chObj = (chWrap as? JsonObject)?.get("chapter") as? JsonObject ?: continue
+                val chapter = chObj.int("number") ?: continue
+                val nodes = chObj["content"] as? JsonArray ?: continue
+                for (node in nodes) {
+                    val seg = node as? JsonObject ?: continue
+                    if (seg.str("type") != "verse") continue
+                    val parts = seg["content"] as? JsonArray ?: continue
+                    val text = buildString {
+                        for (p in parts) when (p) {
+                            // plain prose; footnote ({noteId}) and {lineBreak} objects carry no text
+                            is JsonPrimitive -> p.contentOrNull?.let { if (isNotEmpty()) append(' '); append(it) }
+                            is JsonObject -> p.str("text")?.let { if (isNotEmpty()) append(' '); append(it) }
+                            else -> {}
+                        }
+                    }.trim()
+                    if (text.isNotBlank()) acc.add(book, chapter, text)
+                }
+            }
+        }
+        return acc.build()
     }
 
     // ---------------------------------------------------------------- USFM

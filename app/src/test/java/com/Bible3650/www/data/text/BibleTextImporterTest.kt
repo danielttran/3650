@@ -91,6 +91,45 @@ class BibleTextImporterTest {
     }
 
     @Test
+    fun `parses helloao complete json and skips footnote and linebreak objects`() {
+        val js = """
+            {"translation":{"id":"BSB","completeTranslationApiLink":"/api/BSB/complete.json"},
+             "books":[
+               {"id":"GEN","name":"Genesis","commonName":"Genesis","chapters":[
+                 {"chapter":{"number":1,"content":[
+                   {"type":"heading","content":["The Creation"]},
+                   {"type":"verse","number":1,"content":["In the beginning God created the heavens and the earth."]},
+                   {"type":"line_break"},
+                   {"type":"verse","number":2,"content":["And God said, “Let there be light,”",{"noteId":0},"and there was light.",{"lineBreak":true}]}
+                 ]}}
+               ]}
+             ]}
+        """.trimIndent()
+        assertEquals(TextFormat.HELLOAO, BibleTextImporter.sniff(js))
+        val result = BibleTextImporter.parse(js)
+        assertEquals(
+            "In the beginning God created the heavens and the earth. And God said, “Let there be light,” and there was light.",
+            chapter(result, "Genesis", 1)?.text
+        )
+    }
+
+    @Test
+    fun `helloao normalizes osis book ids`() {
+        val js = """
+            {"translation":{"id":"eng_kjv","completeTranslationApiLink":"/api/eng_kjv/complete.json"},
+             "books":[
+               {"id":"JHN","name":"John","commonName":"John","chapters":[
+                 {"chapter":{"number":3,"content":[
+                   {"type":"verse","number":16,"content":["For God so loved the world."]}
+                 ]}}
+               ]}
+             ]}
+        """.trimIndent()
+        val result = BibleTextImporter.parse(js)
+        assertEquals("For God so loved the world.", chapter(result, "John", 3)?.text)
+    }
+
+    @Test
     fun `parses apocrypha book codes`() {
         val usfm = "\\id SIR\n\\c 1\n\\v 1 All wisdom comes from the Lord."
         val result = BibleTextImporter.parse(usfm)

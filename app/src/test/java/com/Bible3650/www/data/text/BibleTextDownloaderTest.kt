@@ -22,6 +22,25 @@ class BibleTextDownloaderTest {
     }
 
     @Test
+    fun `BULK_FILE parses helloao format`() = runBlocking {
+        val fake = object : HttpFetcher {
+            override suspend fun get(url: String, headers: Map<String, String>): String =
+                """{"translation":{"id":"BSB","completeTranslationApiLink":"/api/BSB/complete.json"},
+                    "books":[{"id":"GEN","commonName":"Genesis","chapters":[
+                      {"chapter":{"number":1,"content":[
+                        {"type":"verse","number":1,"content":["In the beginning.",{"noteId":0}]}
+                      ]}}]}]}"""
+        }
+        val entry = CatalogEntry(
+            id = "bsb", name = "Berean Standard Bible", abbrev = "BSB",
+            adapter = "BULK_FILE", format = "HELLOAO", url = "https://bible.helloao.org/api/BSB/complete.json"
+        )
+        val chapters = BibleTextDownloader.fetchChapters(entry, fake)
+        val gen1 = chapters.firstOrNull { it.book == "Genesis" && it.chapter == 1 }
+        assertEquals("In the beginning.", gen1?.text)
+    }
+
+    @Test
     fun `unknown adapter yields nothing`() = runBlocking {
         val fake = object : HttpFetcher {
             override suspend fun get(url: String, headers: Map<String, String>): String = "{}"

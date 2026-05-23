@@ -27,8 +27,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.Bible3650.www.R
+import com.Bible3650.www.audio.MAX_PLAYBACK_SPEED
+import com.Bible3650.www.audio.MIN_PLAYBACK_SPEED
 import com.Bible3650.www.audio.SleepTimer
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 private fun formatClock(ms: Long): String {
     if (ms <= 0) return "0:00"
@@ -43,8 +46,8 @@ private fun formatClock(ms: Long): String {
     }
 }
 
-private val SPEED_OPTIONS = listOf(0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
 private val SLEEP_MINUTE_OPTIONS = listOf(5, 10, 15, 30, 45, 60)
+private const val SPEED_SNAP = 20f // snap the slider to 0.05× increments
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -178,19 +181,30 @@ fun NowPlayingScreen(
 
                 Spacer(Modifier.height(16.dp))
 
-                // ── Speed (#1) ───────────────────────────────────────────────
-                Text(stringResource(R.string.speed), style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SPEED_OPTIONS.forEach { option ->
-                        val selected = kotlin.math.abs(speed - option) < 0.001f
-                        FilterChip(
-                            selected = selected,
-                            onClick = { viewModel.setSpeed(option) },
-                            label = { Text(if (option == 1.0f) "1×" else "${trimSpeed(option)}×") }
-                        )
-                    }
+                // ── Speed (#1) — continuous fine-tune slider ─────────────────
+                // While dragging, track a local value (snapped to 0.05×) for live feedback
+                // and only commit to the player on release, avoiding a flood of writes.
+                var speedDrag by remember { mutableStateOf<Float?>(null) }
+                val shownSpeed = (speedDrag ?: speed).coerceIn(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.speed), style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "${trimSpeed(shownSpeed)}×",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
+                Slider(
+                    value = shownSpeed,
+                    onValueChange = { speedDrag = (it * SPEED_SNAP).roundToInt() / SPEED_SNAP },
+                    onValueChangeFinished = {
+                        speedDrag?.let { viewModel.setSpeed(it) }
+                        speedDrag = null
+                    },
+                    valueRange = MIN_PLAYBACK_SPEED..MAX_PLAYBACK_SPEED
+                )
 
                 Spacer(Modifier.height(16.dp))
 

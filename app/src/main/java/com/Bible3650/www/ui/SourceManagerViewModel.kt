@@ -93,6 +93,9 @@ class SourceManagerViewModel @Inject constructor(
                     .map { it.uri.toString() }
                     .toSet()
                 val bad = all.mapNotNull { swm ->
+                    // TEXT sources are backed by a stored translation (rootTreeUri = "text://<id>"),
+                    // not a SAF folder, so the folder reachability check never applies to them.
+                    if (swm.source.sourceType == "TEXT") return@mapNotNull null
                     val uriStr = swm.source.rootTreeUri
                     val ok = held.contains(uriStr) && canQueryTree(uriStr)
                     if (ok) null else swm.source.sourceId

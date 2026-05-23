@@ -208,7 +208,10 @@ fun ManageListsScreen(
                     when (op) {
                         is TextOpState.Running -> Text(stringResource(R.string.text_op_preparing), style = MaterialTheme.typography.bodySmall)
                         is TextOpState.Progress -> Text(
-                            stringResource(R.string.text_op_progress, op.done, op.total),
+                            // BULK_FILE downloads report a single (0/1 → 1/1) step; show a plain
+                            // "Downloading…" rather than a confusing "0 / 1 chapters".
+                            if (op.total <= 1) stringResource(R.string.text_op_downloading)
+                            else stringResource(R.string.text_op_progress, op.done, op.total),
                             style = MaterialTheme.typography.bodySmall
                         )
                         is TextOpState.Error -> Text(op.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
