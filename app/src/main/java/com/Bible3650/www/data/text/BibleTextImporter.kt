@@ -147,7 +147,12 @@ object BibleTextImporter {
 
     private val USFM_HEADING_PREFIXES = setOf(
         "h", "id", "ide", "rem", "sts", "toc", "toca", "mt", "ms", "mr", "s", "sr",
-        "r", "d", "sp", "cl", "cp", "ca", "va", "vp", "periph", "iot", "io", "ip", "imt", "is"
+        "r", "d", "sp", "cl", "cp", "ca", "va", "vp", "periph", "iot", "io", "ip", "imt", "is",
+        // Footnote/cross-reference internals. The \f..\f* and \x..\x* pairs are normally stripped
+        // wholesale, but an unclosed note would otherwise leak its reference text into the spoken
+        // verse — drop these markers so footnote prose is never read aloud as scripture.
+        "f", "fr", "ft", "fk", "fq", "fqa", "fl", "fp", "fv", "fdc",
+        "x", "xo", "xt", "xk", "xq"
     )
 
     private fun parseUsfm(content: String): List<ParsedChapter> {

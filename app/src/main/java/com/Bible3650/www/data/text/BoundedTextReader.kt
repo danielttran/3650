@@ -16,5 +16,7 @@ internal fun InputStream.readUtf8UpTo(maxBytes: Int): String? {
         if (total > maxBytes) return null
         output.write(buffer, 0, read)
     }
-    return output.toByteArray().decodeToString()
+    // Decode straight from the stream's buffer; toByteArray() would make a second full-size
+    // copy, ~doubling peak memory for a large (multi-MB) download.
+    return output.toString("UTF-8")
 }

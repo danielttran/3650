@@ -107,17 +107,24 @@ class BibleTextDownloader @Inject constructor(
                 val books = BibleRegistry.getAllBooks()
                 val total = books.sumOf { BibleRegistry.getChapterCount(it) }
                 var done = 0
+                var failures = 0
                 val out = ArrayList<ParsedChapter>(total)
                 for (book in books) {
                     val requestBook = (entry.bookNameOverrides[book] ?: book).replace(" ", "+")
                     for (ch in 1..BibleRegistry.getChapterCount(book)) {
                         val url = entry.url.replace("{book}", requestBook).replace("{chapter}", ch.toString())
                         val resp = runCatching { http.get(url) }.getOrNull()
-                        if (resp != null) out += BibleTextImporter.parse(resp, TextFormat.JSON)
+                        if (resp != null) out += BibleTextImporter.parse(resp, TextFormat.JSON) else failures++
                         done++
                         onProgress(done, total)
                         delay(THROTTLE_MS)
                     }
+                }
+                // Per-chapter fetches were previously swallowed silently, so a throttled or
+                // down endpoint produced a gutted "successful" translation. Tolerate a few
+                // transient blips but fail loudly when most chapters are missing.
+                if (total > 0 && failures * 2 > total) {
+                    throw IOException("Download incomplete: $failures of $total chapters failed for ${entry.id}")
                 }
                 out
             }

@@ -96,7 +96,7 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS `reading_lists_new` (
                 `listId` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                `list_name` TEXT NOT NULL,
+                `list_name` TEXT NOT NULL COLLATE NOCASE,
                 `current_absolute_day` INTEGER NOT NULL,
                 `created_at` INTEGER NOT NULL,
                 `list_order` INTEGER NOT NULL,
