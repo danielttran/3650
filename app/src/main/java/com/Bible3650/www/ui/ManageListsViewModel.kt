@@ -9,6 +9,7 @@ import com.Bible3650.www.data.ValidationResult
 import com.Bible3650.www.data.local.ListWithBooks
 import com.Bible3650.www.data.local.ReadingListEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -37,7 +38,12 @@ class ManageListsViewModel @Inject constructor(
         ValidationResult(emptyList(), emptyList(), true)
     )
 
-    private val _uiEvents = MutableSharedFlow<String>()
+    // Buffer one event with DROP_OLDEST so a failure message emitted while no collector is
+    // attached isn't silently dropped (an unbuffered SharedFlow would suspend/lose it).
+    private val _uiEvents = MutableSharedFlow<String>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
     val uiEvents = _uiEvents.asSharedFlow()
 
     fun resetToDefaults(plan: PresetPlan) {
