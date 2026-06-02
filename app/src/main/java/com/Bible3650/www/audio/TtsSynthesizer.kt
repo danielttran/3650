@@ -208,7 +208,9 @@ class TtsSynthesizer @Inject constructor(
     }
 
     private fun evictIfOverCap() {
-        val files = cacheDir.listFiles()?.filter { it.isFile } ?: return
+        // Only completed .wav files are eligible: skipping .tmp/.part scratch files avoids
+        // deleting an in-flight synthesis's partials (a concurrent call could be writing them).
+        val files = cacheDir.listFiles()?.filter { it.isFile && it.name.endsWith(".wav") } ?: return
         var total = files.sumOf { it.length() }
         if (total <= MAX_CACHE_BYTES) return
         for (f in files.sortedBy { it.lastModified() }) {
@@ -285,9 +287,17 @@ class TtsSynthesizer @Inject constructor(
         }
 
         private fun concatWav(parts: List<File>, out: File): Boolean {
-            val wavs = parts.mapNotNull { readWav(it) }
+            // Fail (rather than mapNotNull-drop) if any part is unreadable: silently skipping a
+            // chunk would emit a chapter that's missing scripture with no error to the user.
+            val wavs = parts.map { readWav(it) ?: return false }
             if (wavs.isEmpty()) return false
             val first = wavs[0]
+            // Parts come from the same engine/voice in one session, so formats should match.
+            // Concatenating PCM with differing rate/channels/bits under one header would play
+            // back garbled, so bail out instead.
+            if (wavs.any { it.sampleRate != first.sampleRate || it.channels != first.channels || it.bits != first.bits }) {
+                return false
+            }
             val body = ByteArrayOutputStream()
             wavs.forEach { body.write(it.pcm) }
             writeWav(out, first.sampleRate, first.channels, first.bits, body.toByteArray())

@@ -63,7 +63,7 @@ data class ReviewUiState(
     val rows: List<MappingRowUi> = emptyList()
 ) {
     val mappedCount: Int get() = rows.count { it.isMapped }
-    val allMapped: Boolean get() = mappedCount == rows.size
+    val allMapped: Boolean get() = rows.isNotEmpty() && mappedCount == rows.size
 }
 
 @HiltViewModel
