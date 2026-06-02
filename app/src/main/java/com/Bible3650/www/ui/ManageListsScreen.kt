@@ -765,7 +765,10 @@ fun ManageListsScreen(
                                                 Icons.Default.DragHandle,
                                                 contentDescription = "Drag to reorder",
                                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.pointerInput(book, selectedBooks.size) {
+                                                // idx MUST be a key: the list is keyed by book, so a
+                                                // reordered row keeps its identity and pointerInput would
+                                                // not restart — leaving the drag lambdas capturing a stale idx.
+                                                modifier = Modifier.pointerInput(book, idx, selectedBooks.size) {
                                                     detectDragGesturesAfterLongPress(
                                                         onDragStart = { draggingIndex = idx; dragOffsetY = 0f },
                                                         onDrag = { change, amount ->

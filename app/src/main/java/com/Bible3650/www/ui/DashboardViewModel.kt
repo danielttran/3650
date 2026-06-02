@@ -9,6 +9,7 @@ import com.Bible3650.www.audio.SleepTimer
 import com.Bible3650.www.data.BibleRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -57,7 +58,13 @@ class DashboardViewModel @Inject constructor(
     private val audioManager: AudioControllerManager
 ) : ViewModel() {
 
-    private val _uiEvents = MutableSharedFlow<DashboardUiEvent>()
+    // Buffer one event with DROP_OLDEST so a playback error emitted before the UI collector
+    // attaches (e.g. during startup) is delivered when it subscribes, instead of suspending the
+    // forwarder. Mirrors AudioControllerManager._playerError.
+    private val _uiEvents = MutableSharedFlow<DashboardUiEvent>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
     val uiEvents = _uiEvents.asSharedFlow()
 
     // currentMediaId is exposed separately so the UI can derive isPlaying per-item
