@@ -34,6 +34,7 @@ import android.net.Uri
 import androidx.core.net.toUri
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineDispatcher
 import com.Bible3650.www.di.MainDispatcher
 import com.Bible3650.www.di.IoDispatcher
@@ -57,6 +58,15 @@ private const val TASK_ID_SEPARATOR = "_"
  */
 internal fun playlistSourceKey(source: AudioSourceEntity?): String =
     if (source == null) "none" else "${source.sourceId}:${source.sourceType}:${source.translationId ?: -1L}"
+
+/** Thread-safe generation gate for asynchronous playlist builds. */
+internal class PlaylistRequestTracker {
+    private val generation = AtomicLong()
+
+    fun next(): Long = generation.incrementAndGet()
+    fun invalidate() { generation.incrementAndGet() }
+    fun isCurrent(requestId: Long): Boolean = generation.get() == requestId
+}
 
 /** State of the optional sleep timer that auto-pauses playback. */
 sealed interface SleepTimer {
@@ -138,15 +148,11 @@ class AudioControllerManager @Inject constructor(
                     withContext(mainDispatcher) {
                         val loaded = currentPlaylistSourceKey
                         if (loaded != null && loaded != newKey) {
-                            // Invariant: do NOT bump currentPlaylistRequestId here. A concurrent
-                            // switchSource → resumeFromSnapshot rebuild is in flight using the
-                            // current requestId; bumping it would cancel that rebuild and leave
+                            // Invariant: do NOT invalidate playlistRequests here. A concurrent
+                            // switchSource → resumeFromSnapshot rebuild may already be in flight;
+                            // invalidating it would cancel that rebuild and leave
                             // the player empty after a source switch.
-                            _player.value?.let { it.stop(); it.clearMediaItems() }
-                            currentPlaylistSourceKey = null
-                            _currentMediaId.value = null
-                            _currentPosition.value = 0L
-                            _duration.value = 0L
+                            clearLoadedPlaylist()
                         }
                     }
                 }
@@ -284,7 +290,7 @@ class AudioControllerManager @Inject constructor(
         }, ContextCompat.getMainExecutor(context))
     }
 
-    private var currentPlaylistRequestId: Long = 0
+    private val playlistRequests = PlaylistRequestTracker()
 
     // Identifies which source the currently-loaded player playlist was built for. The
     // playlist fast-path must not reuse media items across a source switch, because task
@@ -319,7 +325,7 @@ class AudioControllerManager @Inject constructor(
             return
         }
 
-        val requestId = ++currentPlaylistRequestId
+        val requestId = playlistRequests.next()
 
         scope.launch(ioDispatcher) {
             try {
@@ -332,7 +338,7 @@ class AudioControllerManager @Inject constructor(
                 // switch to a TEXT (TTS) source (and vice versa). Skipped on forceReload.
                 if (!forceReload && tasks.isNotEmpty()) {
                     val reused = withContext(mainDispatcher) {
-                        if (requestId != currentPlaylistRequestId) return@withContext false
+                        if (!playlistRequests.isCurrent(requestId)) return@withContext false
                         if (sourceKey != currentPlaylistSourceKey) return@withContext false
                         if (player.mediaItemCount != tasks.size) return@withContext false
                         for (i in tasks.indices) {
@@ -366,6 +372,9 @@ class AudioControllerManager @Inject constructor(
                     val uri = resolveUri(task)
                     buildMediaItem(task, uri)
                 }
+                // The source may have changed while SAF queries were running. Never install
+                // a playlist built for a deleted or inactive source.
+                if (!sourceStillActive(sourceKey)) return@launch
 
                 // #13: Warn if the start item has no resolvable URI, and also report
                 // when other items in the playlist are missing — those would otherwise
@@ -381,7 +390,7 @@ class AudioControllerManager @Inject constructor(
                 }
 
                 withContext(mainDispatcher) {
-                    if (requestId != currentPlaylistRequestId) return@withContext
+                    if (!playlistRequests.isCurrent(requestId)) return@withContext
 
                     val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs
                                    else androidx.media3.common.C.TIME_UNSET
@@ -395,6 +404,9 @@ class AudioControllerManager @Inject constructor(
             }
         }
     }
+
+    private suspend fun sourceStillActive(expectedSourceKey: String): Boolean =
+        playlistSourceKey(repository.audioSourceDao.getActiveSource()) == expectedSourceKey
 
     private fun buildMediaItem(task: DailyTask, uri: Uri?): MediaItem =
         MediaItem.Builder()
@@ -428,12 +440,14 @@ class AudioControllerManager @Inject constructor(
             )
             return
         }
+        // TTS synthesis may take long enough for the user to switch or delete sources.
+        if (!playlistRequests.isCurrent(requestId) || !sourceStillActive(sourceKey)) return
 
         val mediaItems = tasks.mapIndexed { i, task ->
             buildMediaItem(task, if (i == safeStartIndex) startUri else null)
         }
         withContext(mainDispatcher) {
-            if (requestId != currentPlaylistRequestId) return@withContext
+            if (!playlistRequests.isCurrent(requestId)) return@withContext
             val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs
                            else androidx.media3.common.C.TIME_UNSET
             player.setMediaItems(mediaItems, safeStartIndex, startPos)
@@ -445,11 +459,11 @@ class AudioControllerManager @Inject constructor(
         // Prefetch the rest in play order (after the start, then wrap to the beginning).
         val order = (safeStartIndex + 1 until tasks.size) + (0 until safeStartIndex)
         for (i in order) {
-            if (requestId != currentPlaylistRequestId) return
+            if (!playlistRequests.isCurrent(requestId) || !sourceStillActive(sourceKey)) return
             val task = tasks[i]
             val uri = ttsSynthesizer.synthesizeChapter(translationId, task.targetBook, task.targetChapter) ?: continue
             withContext(mainDispatcher) {
-                if (requestId != currentPlaylistRequestId) return@withContext
+                if (!playlistRequests.isCurrent(requestId)) return@withContext
                 if (i < player.mediaItemCount && player.getMediaItemAt(i).mediaId == task.uniqueId) {
                     player.replaceMediaItem(i, buildMediaItem(task, uri))
                 }
@@ -482,6 +496,41 @@ class AudioControllerManager @Inject constructor(
             val pos = if (resetPosition) 0L else snapshot.positionMs
             playTasks(tasks, index, pos, playWhenReady = snapshot.wasPlaying, forceReload = true)
         }
+    }
+
+    /** Cancels URI/TTS work started for a source that is about to become inactive. */
+    fun invalidatePendingPlaylistLoads() {
+        playlistRequests.invalidate()
+    }
+
+    /** Rebuilds the loaded playlist after lists or active-source folder mappings change. */
+    fun reloadCurrentPlaylist() {
+        val snapshot = currentPlaybackSnapshot()
+        playlistRequests.invalidate()
+        // Clear immediately: if the current task was deleted, resumeFromSnapshot will time out
+        // and must not leave the removed chapter playing from an obsolete playlist.
+        clearLoadedPlaylist()
+        if (snapshot != null) resumeFromSnapshot(snapshot, resetPosition = false)
+    }
+
+    private fun clearLoadedPlaylist() {
+        _player.value?.let { player ->
+            player.stop()
+            player.clearMediaItems()
+        }
+        currentPlaylistSourceKey = null
+        _isPlaying.value = false
+        _currentMediaId.value = null
+        _currentPosition.value = 0L
+        _duration.value = 0L
+    }
+
+    /** Stops stale playback when the last installed source is removed or progress is restored. */
+    fun stopPlayback() {
+        playlistRequests.invalidate()
+        clearLoadedPlaylist()
+        cancelSleepTimer()
+        prefs.edit().remove(KEY_MEDIA_ID).remove(KEY_POSITION).apply()
     }
 
     fun togglePlayPause() {
@@ -568,6 +617,7 @@ class AudioControllerManager @Inject constructor(
     // #10: Do NOT cancel the singleton scope here. The scope must survive across
     // release/reconnect cycles. Only tear down the controller and position job.
     fun release() {
+        playlistRequests.invalidate()
         positionUpdateJob?.cancel()
         positionUpdateJob = null
         sleepTimerJob?.cancel()

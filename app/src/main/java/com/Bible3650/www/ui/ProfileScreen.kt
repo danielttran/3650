@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.ui.res.stringResource
 import com.Bible3650.www.R
+import com.Bible3650.www.data.text.readUtf8UpTo
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,6 +23,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.IOException
+
+private const val MAX_BACKUP_BYTES = 64 * 1024 * 1024
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,9 +49,9 @@ fun ProfileScreen(
                 try {
                     val json = viewModel.exportData()
                     withContext(Dispatchers.IO) {
-                        context.contentResolver.openOutputStream(it)?.use { stream ->
-                            stream.write(json.toByteArray())
-                        }
+                        val stream = context.contentResolver.openOutputStream(it)
+                            ?: throw IOException("Could not open backup destination")
+                        stream.use { output -> output.write(json.toByteArray()) }
                     }
                     snackbarHostState.showSnackbar(context.getString(R.string.progress_exported))
                 } catch (e: Exception) {
@@ -65,10 +69,9 @@ fun ProfileScreen(
                 try {
                     val json = withContext(Dispatchers.IO) {
                         context.contentResolver.openInputStream(it)?.use { stream ->
-                            val bytes = stream.readBytes()
-                            // Reject files over 10 MB to prevent OOM on corrupted/malicious backups
-                            if (bytes.size > 10 * 1024 * 1024) null
-                            else bytes.decodeToString()
+                            // Text-Bible backups can legitimately exceed the old 10 MB cap. Read
+                            // incrementally so a corrupted provider cannot allocate without bound.
+                            stream.readUtf8UpTo(MAX_BACKUP_BYTES)
                         }
                     }
                     if (json != null) {

@@ -49,6 +49,11 @@ data class SourceWithMappings(
     val mappings: List<BookMappingEntity>
 )
 
+data class DeleteSourceResult(
+    val deletedActiveSource: Boolean,
+    val fallbackSource: AudioSourceEntity?
+)
+
 @Dao
 interface AudioSourceDao {
 
@@ -92,6 +97,19 @@ interface AudioSourceDao {
 
     @Delete
     suspend fun deleteSource(source: AudioSourceEntity)
+
+    @Query("SELECT * FROM audio_sources ORDER BY created_at ASC, sourceId ASC LIMIT 1")
+    suspend fun getFirstSource(): AudioSourceEntity?
+
+    /** Deletes [source] and keeps playback usable by activating the oldest remaining source. */
+    @Transaction
+    suspend fun deleteAndActivateFallback(source: AudioSourceEntity): DeleteSourceResult {
+        val deletedActiveSource = getActiveSource()?.sourceId == source.sourceId
+        deleteSource(source)
+        val fallback = if (deletedActiveSource) getFirstSource() else null
+        fallback?.let { setActive(it.sourceId) }
+        return DeleteSourceResult(deletedActiveSource, fallback)
+    }
 
     @Update
     suspend fun updateSource(source: AudioSourceEntity)

@@ -56,6 +56,15 @@ class BibleTextImporterTest {
     }
 
     @Test
+    fun `rejects XML documents with doctypes`() {
+        val osis = """
+            <!DOCTYPE osis [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+            <osis><osisText><verse osisID="John.3.16">&xxe;</verse></osisText></osis>
+        """.trimIndent()
+        assertEquals(emptyList<ParsedChapter>(), BibleTextImporter.parse(osis, TextFormat.OSIS))
+    }
+
+    @Test
     fun `parses Zefania verses by name`() {
         val zef = """
             <XMLBIBLE><BIBLEBOOK bnumber="1" bname="Genesis">
