@@ -10,7 +10,6 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import org.w3c.dom.Node
 import java.io.ByteArrayInputStream
-import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 
 /** One parsed, cleaned chapter ready to store. [book] is a canonical [BookNameNormalizer] name. */
@@ -203,8 +202,11 @@ object BibleTextImporter {
             runCatching { setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false) }
             runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
             runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
-            runCatching { setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "") }
-            runCatching { setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "") }
+            // Android's javax.xml.XMLConstants does not define the JAXP 1.5 ACCESS_EXTERNAL_*
+            // constants, so reference the property URIs by literal value. Best-effort: parsers
+            // that don't recognize them throw, which runCatching swallows.
+            runCatching { setAttribute("http://javax.xml.XMLConstants/property/accessExternalDTD", "") }
+            runCatching { setAttribute("http://javax.xml.XMLConstants/property/accessExternalSchema", "") }
         }
         factory.newDocumentBuilder().parse(ByteArrayInputStream(content.toByteArray(Charsets.UTF_8)))
     }.getOrNull()
