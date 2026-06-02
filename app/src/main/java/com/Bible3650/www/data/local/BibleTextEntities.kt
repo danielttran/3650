@@ -2,11 +2,13 @@ package com.Bible3650.www.data.local
 
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
 
 /**
  * An installed text translation (downloaded from the catalog or imported by the user).
  * The actual scripture lives in [BibleTextEntity], one row per chapter.
  */
+@Serializable
 @Entity(tableName = "bible_translations")
 data class BibleTranslationEntity(
     @PrimaryKey(autoGenerate = true) val translationId: Long = 0,
@@ -21,6 +23,7 @@ data class BibleTranslationEntity(
 )
 
 /** One chapter of reading-ready prose (verse numbers / notes / headings already stripped). */
+@Serializable
 @Entity(
     tableName = "bible_texts",
     primaryKeys = ["translationId", "book", "chapter"],
@@ -66,9 +69,15 @@ interface BibleTextDao {
     @Query("SELECT COUNT(*) FROM bible_texts WHERE translationId = :translationId")
     suspend fun countChapters(translationId: Long): Int
 
+    @Query("SELECT * FROM bible_texts WHERE translationId = :translationId ORDER BY book ASC, chapter ASC")
+    suspend fun getChaptersForTranslation(translationId: Long): List<BibleTextEntity>
+
     @Delete
     suspend fun deleteTranslation(translation: BibleTranslationEntity)
 
     @Query("DELETE FROM bible_texts WHERE translationId = :translationId")
     suspend fun clearTextForTranslation(translationId: Long)
+
+    @Query("DELETE FROM bible_translations")
+    suspend fun clearAllTranslations()
 }

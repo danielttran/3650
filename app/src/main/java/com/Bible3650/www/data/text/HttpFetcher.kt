@@ -27,9 +27,19 @@ class UrlHttpFetcher @Inject constructor() : HttpFetcher {
         try {
             val code = conn.responseCode
             if (code !in 200..299) throw IOException("HTTP $code for $url")
-            conn.inputStream.bufferedReader().use { it.readText() }
+            if (conn.contentLengthLong > MAX_HTTP_RESPONSE_BYTES) {
+                throw IOException("HTTP response too large for $url")
+            }
+            conn.inputStream.use { stream ->
+                stream.readUtf8UpTo(MAX_HTTP_RESPONSE_BYTES)
+                    ?: throw IOException("HTTP response too large for $url")
+            }
         } finally {
             conn.disconnect()
         }
+    }
+
+    companion object {
+        private const val MAX_HTTP_RESPONSE_BYTES = 64 * 1024 * 1024
     }
 }

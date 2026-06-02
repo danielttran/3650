@@ -2,6 +2,7 @@ package com.Bible3650.www.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.Bible3650.www.audio.AudioControllerManager
 import com.Bible3650.www.data.BibleRepository
 import com.Bible3650.www.data.ListValidator
 import com.Bible3650.www.data.ValidationResult
@@ -20,7 +21,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class ManageListsViewModel @Inject constructor(
-    private val repository: BibleRepository
+    private val repository: BibleRepository,
+    private val audioManager: AudioControllerManager
 ) : ViewModel() {
 
     // #15: Use repository.listsWithBooksFlow instead of accessing repository.dao directly.
@@ -41,6 +43,7 @@ class ManageListsViewModel @Inject constructor(
     fun resetToDefaults(plan: PresetPlan) {
         viewModelScope.launch {
             try {
+                audioManager.stopPlayback()
                 repository.resetToDefaults(plan)
                 _uiEvents.emit("Lists restored to \"${plan.displayName}\".")
             } catch (e: Exception) {
@@ -54,6 +57,7 @@ class ManageListsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 repository.deleteList(list)
+                audioManager.reloadCurrentPlaylist()
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error deleting list", e)
                 _uiEvents.emit("Failed to delete list.")
@@ -78,6 +82,7 @@ class ManageListsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 repository.createList(trimmedName, books, colorArgb)
+                audioManager.reloadCurrentPlaylist()
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error creating list", e)
                 _uiEvents.emit("Failed to create list.")
@@ -89,6 +94,7 @@ class ManageListsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 repository.updateList(list, newBooks)
+                audioManager.reloadCurrentPlaylist()
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error updating list", e)
                 _uiEvents.emit("Failed to update list.")
@@ -100,6 +106,7 @@ class ManageListsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 repository.reorderLists(reorderedLists.map { it.listId })
+                audioManager.reloadCurrentPlaylist()
             } catch (e: Exception) {
                 android.util.Log.e("ManageListsVM", "Error reordering lists", e)
                 _uiEvents.emit("Failed to reorder lists.")

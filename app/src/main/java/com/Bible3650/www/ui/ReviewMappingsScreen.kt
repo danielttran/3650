@@ -29,6 +29,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.Bible3650.www.data.BibleRegistry
+import com.Bible3650.www.audio.AudioControllerManager
+import com.Bible3650.www.data.BibleRepository
 import com.Bible3650.www.data.local.AudioSourceDao
 import com.Bible3650.www.data.local.AudioSourceEntity
 import com.Bible3650.www.data.local.BookMappingEntity
@@ -67,7 +69,9 @@ data class ReviewUiState(
 @HiltViewModel
 class ReviewMappingsViewModel @Inject constructor(
     savedState: SavedStateHandle,
-    private val dao: AudioSourceDao
+    private val dao: AudioSourceDao,
+    private val repository: BibleRepository,
+    private val audioManager: AudioControllerManager
 ) : ViewModel() {
 
     private val sourceId: Long = run {
@@ -114,7 +118,7 @@ class ReviewMappingsViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            dao.upsertMapping(
+            repository.upsertAudioMapping(
                 BookMappingEntity(
                     sourceId        = sourceId,
                     bookName        = bookName,
@@ -124,6 +128,7 @@ class ReviewMappingsViewModel @Inject constructor(
                     overrideTreeUri = treeUri.toString()
                 )
             )
+            if (uiState.value.source?.isActive == true) audioManager.reloadCurrentPlaylist()
         }
     }
 
@@ -166,8 +171,10 @@ fun ReviewMappingsScreen(
             coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                 // Count audio files in the picked folder to confirm it's the right one
                 val fileCount = countAudioFilesInTree(context.contentResolver, uri)
-                viewModel.onManualBookFolderPicked(book, uri, fileCount)
-                isCountingFilesFor = null
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    viewModel.onManualBookFolderPicked(book, uri, fileCount)
+                    isCountingFilesFor = null
+                }
             }
         }
         pendingBook = null
@@ -312,10 +319,10 @@ private fun MappingRow(row: MappingRowUi, isCounting: Boolean, onPickFolder: () 
 // ---------------------------------------------------------------------------
 
 private fun countAudioFilesInTree(resolver: android.content.ContentResolver, treeUri: Uri): Int {
-    val docId = DocumentsContract.getTreeDocumentId(treeUri)
-    val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
     var count = 0
     try {
+        val docId = DocumentsContract.getTreeDocumentId(treeUri)
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
         resolver.query(
             childrenUri,
             arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME,

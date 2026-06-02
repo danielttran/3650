@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.core.net.toUri
+import androidx.room.withTransaction
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.Bible3650.www.audio.AudioControllerManager
@@ -11,6 +12,7 @@ import com.Bible3650.www.audio.BookDetectionEngine
 import com.Bible3650.www.audio.DetectionResult
 import com.Bible3650.www.data.BibleRegistry
 import com.Bible3650.www.data.BibleRepository
+import com.Bible3650.www.data.local.AppDatabase
 import com.Bible3650.www.data.local.AudioSourceDao
 import com.Bible3650.www.data.local.AudioSourceEntity
 import com.Bible3650.www.data.local.BibleTextDao
@@ -21,6 +23,7 @@ import com.Bible3650.www.data.local.SourceWithMappings
 import com.Bible3650.www.data.text.BibleTextDownloader
 import com.Bible3650.www.data.text.BibleTextImporter
 import com.Bible3650.www.data.text.CatalogEntry
+import com.Bible3650.www.data.text.readUtf8UpTo
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -42,6 +45,22 @@ sealed interface DetectionState {
     data class Error(val message: String) : DetectionState
 }
 
+internal fun downloadedCatalogEntryIds(
+    translations: List<BibleTranslationEntity>,
+    sources: List<SourceWithMappings>,
+    catalog: List<CatalogEntry>
+): Set<String> {
+    val selectableTranslationIds = sources
+        .filter { it.source.sourceType == "TEXT" }
+        .mapNotNull { it.source.translationId }
+        .toSet()
+    val installedAbbrevs = translations
+        .filter { it.origin == "DOWNLOAD" && it.translationId in selectableTranslationIds }
+        .map { it.abbrev }
+        .toSet()
+    return catalog.filter { it.abbrev in installedAbbrevs }.map { it.id }.toSet()
+}
+
 @HiltViewModel
 class SourceManagerViewModel @Inject constructor(
     private val dao: AudioSourceDao,
@@ -50,6 +69,7 @@ class SourceManagerViewModel @Inject constructor(
     private val audioManager: AudioControllerManager,
     private val downloader: BibleTextDownloader,
     private val textDao: BibleTextDao,
+    private val database: AppDatabase,
     private val contentResolver: ContentResolver
 ) : ViewModel() {
 
@@ -82,13 +102,11 @@ class SourceManagerViewModel @Inject constructor(
     private val _textOpError = MutableStateFlow<String?>(null)
     val textOpError: StateFlow<String?> = _textOpError
 
-    // Catalog entry ids that are already installed (a DOWNLOAD-origin translation with that
-    // abbrev exists). Drives the per-row Download → Delete toggle and blocks duplicates.
+    // Catalog entry ids that are already installed and selectable (a DOWNLOAD-origin
+    // translation plus its TEXT source exist). Drives the per-row Download → Delete toggle.
     val downloadedEntryIds: StateFlow<Set<String>> =
-        combine(textDao.observeTranslations(), _catalog) { translations, catalog ->
-            val installed = translations.filter { it.origin == "DOWNLOAD" }.map { it.abbrev }.toSet()
-            catalog.filter { it.abbrev in installed }.map { it.id }.toSet()
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+        combine(textDao.observeTranslations(), sources, _catalog, ::downloadedCatalogEntryIds)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
     // Catalog entry id whose translation is the active source, so the row can show Active / Use.
     val activeTextEntryId: StateFlow<String?> =
@@ -144,29 +162,29 @@ class SourceManagerViewModel @Inject constructor(
                 }
 
                 val sourceId = withContext(Dispatchers.IO) {
-                    val active = dao.getActiveSource()
-                    dao.insertSource(
-                        AudioSourceEntity(
-                            displayName  = suggestedName,
-                            rootTreeUri  = treeUri.toString(),
-                            isActive     = active == null // auto-activate first source
-                        )
-                    )
-                }
-
-                withContext(Dispatchers.IO) {
-                    val mappings = results.mapNotNull { r ->
-                        r.folderDocId?.let { docId ->
-                            BookMappingEntity(
-                                sourceId   = sourceId,
-                                bookName   = r.bookName,
-                                folderDocId = docId,
-                                confidence = r.confidence,
-                                fileCount  = r.fileCount
+                    database.withTransaction {
+                        val active = dao.getActiveSource()
+                        val id = dao.insertSource(
+                            AudioSourceEntity(
+                                displayName  = suggestedName,
+                                rootTreeUri  = treeUri.toString(),
+                                isActive     = active == null // auto-activate first source
                             )
+                        )
+                        val mappings = results.mapNotNull { r ->
+                            r.folderDocId?.let { docId ->
+                                BookMappingEntity(
+                                    sourceId   = id,
+                                    bookName   = r.bookName,
+                                    folderDocId = docId,
+                                    confidence = r.confidence,
+                                    fileCount  = r.fileCount
+                                )
+                            }
                         }
+                        dao.upsertMappings(mappings)
+                        id
                     }
-                    dao.upsertMappings(mappings)
                 }
 
                 repository.clearCache()
@@ -197,27 +215,30 @@ class SourceManagerViewModel @Inject constructor(
                 }
                 val results = withContext(Dispatchers.IO) { engine.detect(treeUri) }
                 withContext(Dispatchers.IO) {
-                    dao.updateSource(
-                        existing.source.copy(
-                            rootTreeUri = treeUri.toString(),
-                            displayName = suggestedName
-                        )
-                    )
-                    dao.clearMappingsForSource(sourceId)
-                    val mappings = results.mapNotNull { r ->
-                        r.folderDocId?.let { docId ->
-                            BookMappingEntity(
-                                sourceId    = sourceId,
-                                bookName    = r.bookName,
-                                folderDocId = docId,
-                                confidence  = r.confidence,
-                                fileCount   = r.fileCount
+                    database.withTransaction {
+                        dao.updateSource(
+                            existing.source.copy(
+                                rootTreeUri = treeUri.toString(),
+                                displayName = suggestedName
                             )
+                        )
+                        dao.clearMappingsForSource(sourceId)
+                        val mappings = results.mapNotNull { r ->
+                            r.folderDocId?.let { docId ->
+                                BookMappingEntity(
+                                    sourceId    = sourceId,
+                                    bookName    = r.bookName,
+                                    folderDocId = docId,
+                                    confidence  = r.confidence,
+                                    fileCount   = r.fileCount
+                                )
+                            }
                         }
+                        dao.upsertMappings(mappings)
                     }
-                    dao.upsertMappings(mappings)
                 }
                 repository.clearCache()
+                if (existing.source.isActive) audioManager.reloadCurrentPlaylist()
                 refreshSourceHealth()
                 updateApocryphaSuggestion(results)
                 _detectionState.value = DetectionState.Done(sourceId)
@@ -297,10 +318,19 @@ class SourceManagerViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 // Idempotent: never download a translation that is already installed (#2).
-                val exists = textDao.getTranslations().any { it.origin == "DOWNLOAD" && it.abbrev == entry.abbrev }
-                if (!exists) {
-                    val translationId = downloader.download(entry)
-                    createTextSource(translationId, entry.name)
+                val existing = textDao.getTranslations()
+                    .firstOrNull { it.origin == "DOWNLOAD" && it.abbrev == entry.abbrev }
+                val existingSource = existing?.let { translation ->
+                    dao.getAllSources().firstOrNull { it.source.translationId == translation.translationId }
+                }
+                if (existingSource == null) {
+                    // A translation without a source is debris from an interrupted write in an
+                    // older app version. Remove it and perform a clean transactional download.
+                    existing?.let { textDao.deleteTranslation(it) }
+                    downloader.download(entry) { translationId ->
+                        insertTextSource(translationId, entry.name)
+                    }
+                    repository.clearCache()
                 }
             } catch (e: Exception) {
                 android.util.Log.e("SourceManager", "Text download failed", e)
@@ -340,27 +370,30 @@ class SourceManagerViewModel @Inject constructor(
         _downloadingId.value = IMPORT_ID
         viewModelScope.launch {
             try {
-                val translationId = withContext(Dispatchers.IO) {
-                    val content = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                        ?: throw IllegalStateException("Could not read file")
+                withContext(Dispatchers.IO) {
+                    val content = contentResolver.openInputStream(uri)?.use { stream ->
+                        stream.readUtf8UpTo(MAX_TEXT_IMPORT_BYTES)
+                    } ?: throw IllegalStateException("Could not read file or file exceeds 32 MB")
                     val chapters = BibleTextImporter.parse(content)
                     if (chapters.isEmpty()) throw IllegalStateException("No scripture found in file")
                     val hasApoc = chapters.any { BibleRegistry.isApocryphal(it.book) }
-                    val tid = textDao.insertTranslation(
-                        BibleTranslationEntity(
-                            name = displayName,
-                            abbrev = displayName.take(8),
-                            origin = "IMPORT",
-                            hasApocrypha = hasApoc,
-                            license = "Imported by user"
+                    database.withTransaction {
+                        val tid = textDao.insertTranslation(
+                            BibleTranslationEntity(
+                                name = displayName,
+                                abbrev = displayName.take(8),
+                                origin = "IMPORT",
+                                hasApocrypha = hasApoc,
+                                license = "Imported by user"
+                            )
                         )
-                    )
-                    chapters.chunked(200).forEach { batch ->
-                        textDao.upsertChapters(batch.map { BibleTextEntity(tid, it.book, it.chapter, it.text) })
+                        chapters.chunked(200).forEach { batch ->
+                            textDao.upsertChapters(batch.map { BibleTextEntity(tid, it.book, it.chapter, it.text) })
+                        }
+                        insertTextSource(tid, displayName)
                     }
-                    tid
                 }
-                createTextSource(translationId, displayName)
+                repository.clearCache()
             } catch (e: Exception) {
                 android.util.Log.e("SourceManager", "Text import failed", e)
                 _textOpError.value = "Import failed: ${e.localizedMessage ?: "could not read file"}"
@@ -370,7 +403,7 @@ class SourceManagerViewModel @Inject constructor(
         }
     }
 
-    private suspend fun createTextSource(translationId: Long, name: String) {
+    private suspend fun insertTextSource(translationId: Long, name: String) {
         val active = dao.getActiveSource()
         dao.insertSource(
             AudioSourceEntity(
@@ -381,7 +414,6 @@ class SourceManagerViewModel @Inject constructor(
                 translationId = translationId
             )
         )
-        repository.clearCache()
     }
 
     private val _uiEvents = MutableSharedFlow<String>()
@@ -393,6 +425,7 @@ class SourceManagerViewModel @Inject constructor(
                 // Capture playback before switching so we can resume the same book+chapter
                 // on the new source (position is reset only when the source type changes).
                 val snapshot = audioManager.currentPlaybackSnapshot()
+                audioManager.invalidatePendingPlaylistLoads()
                 val previous = dao.getActiveSource()
                 val typeChanged = previous != null && previous.sourceType != source.sourceType
                 dao.switchTo(source.sourceId)
@@ -409,15 +442,31 @@ class SourceManagerViewModel @Inject constructor(
     fun deleteSource(source: AudioSourceEntity) {
         viewModelScope.launch {
             try {
-                dao.deleteSource(source)
-                // For a text source, also remove the stored translation (cascades its text).
-                if (source.sourceType == "TEXT") {
-                    source.translationId?.let { tid ->
-                        textDao.getTranslation(tid)?.let { textDao.deleteTranslation(it) }
+                val snapshot = audioManager.currentPlaybackSnapshot()
+                audioManager.invalidatePendingPlaylistLoads()
+                val result = database.withTransaction {
+                    val deleteResult = dao.deleteAndActivateFallback(source)
+                    // For a text source, also remove the stored translation (cascades its text).
+                    if (source.sourceType == "TEXT") {
+                        source.translationId?.let { tid ->
+                            textDao.getTranslation(tid)?.let { textDao.deleteTranslation(it) }
+                        }
                     }
+                    deleteResult
                 }
                 repository.clearCache()
                 refreshSourceHealth()
+                if (result.deletedActiveSource) {
+                    val fallback = result.fallbackSource
+                    if (fallback == null) {
+                        audioManager.stopPlayback()
+                    } else if (snapshot != null) {
+                        audioManager.resumeFromSnapshot(
+                            snapshot,
+                            resetPosition = source.sourceType != fallback.sourceType
+                        )
+                    }
+                }
             } catch (e: Exception) {
                 android.util.Log.e("SourceManager", "Error deleting source", e)
                 _uiEvents.emit("Failed to delete audio source.")
@@ -427,6 +476,7 @@ class SourceManagerViewModel @Inject constructor(
 
     companion object {
         private const val APOCRYPHA_LIST_NAME = "Apocrypha"
+        private const val MAX_TEXT_IMPORT_BYTES = 32 * 1024 * 1024
         /** Sentinel [downloadingId] value used while a user file import is in progress. */
         const val IMPORT_ID = "::import::"
     }

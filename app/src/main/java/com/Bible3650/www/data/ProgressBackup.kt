@@ -2,6 +2,8 @@ package com.Bible3650.www.data
 
 import com.Bible3650.www.data.local.AudioSourceEntity
 import com.Bible3650.www.data.local.BookMappingEntity
+import com.Bible3650.www.data.local.BibleTextEntity
+import com.Bible3650.www.data.local.BibleTranslationEntity
 import com.Bible3650.www.data.local.ListBookEntity
 import com.Bible3650.www.data.local.ReadingListEntity
 import kotlinx.serialization.Serializable
@@ -10,7 +12,8 @@ import kotlinx.serialization.Serializable
 data class ProgressBackup(
     val version: Int = 1,
     val readingLists: List<ReadingListBackup?>? = emptyList(),
-    val audioSources: List<AudioSourceBackup?>? = emptyList()
+    val audioSources: List<AudioSourceBackup?>? = emptyList(),
+    val textTranslations: List<TextTranslationBackup?>? = emptyList()
 )
 
 @Serializable
@@ -23,4 +26,11 @@ data class ReadingListBackup(
 data class AudioSourceBackup(
     val entity: AudioSourceEntity?,
     val mappings: List<BookMappingEntity>?
+)
+
+
+@Serializable
+data class TextTranslationBackup(
+    val entity: BibleTranslationEntity?,
+    val chapters: List<BibleTextEntity>?
 )

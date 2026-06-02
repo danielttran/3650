@@ -2,6 +2,7 @@ package com.Bible3650.www.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.Bible3650.www.audio.AudioControllerManager
 import com.Bible3650.www.data.BibleRegistry
 import com.Bible3650.www.data.BibleRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,7 +26,8 @@ data class ProfileUiState(
 
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
-    private val repository: BibleRepository
+    private val repository: BibleRepository,
+    private val audioManager: AudioControllerManager
 ) : ViewModel() {
 
     // #15: Use repository.listsWithBooksFlow instead of repository.dao directly.
@@ -95,5 +97,10 @@ class ProfileViewModel @Inject constructor(
 
     suspend fun exportData(): String = repository.exportProgress()
 
-    suspend fun importData(json: String): Boolean = repository.importProgress(json)
+    suspend fun importData(json: String): Boolean {
+        // Stop before the destructive restore transaction so a finishing stale track cannot
+        // advance a newly inserted list that happens to receive the same logical position.
+        audioManager.stopPlayback()
+        return repository.importProgress(json)
+    }
 }

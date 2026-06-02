@@ -2,6 +2,8 @@ package com.Bible3650.www.data
 
 import com.Bible3650.www.data.local.AudioSourceEntity
 import com.Bible3650.www.data.local.BookMappingEntity
+import com.Bible3650.www.data.local.BibleTextEntity
+import com.Bible3650.www.data.local.BibleTranslationEntity
 import com.Bible3650.www.data.local.ListBookEntity
 import com.Bible3650.www.data.local.ReadingListEntity
 import kotlinx.serialization.decodeFromString
@@ -26,6 +28,7 @@ class ProgressBackupSerializationTest {
     }
 
     private fun sampleBackup() = ProgressBackup(
+        version = 2,
         readingLists = listOf(
             ReadingListBackup(
                 entity = ReadingListEntity(
@@ -46,6 +49,14 @@ class ProgressBackupSerializationTest {
                     BookMappingEntity(sourceId = 7, bookName = "Psalm", folderDocId = "doc:9", confidence = 0.95f, fileCount = 150)
                 )
             )
+        ),
+        textTranslations = listOf(
+            TextTranslationBackup(
+                entity = BibleTranslationEntity(
+                    translationId = 8, name = "Berean Standard Bible", abbrev = "BSB", installedAt = 3000L
+                ),
+                chapters = listOf(BibleTextEntity(translationId = 8, book = "John", chapter = 3, text = "For God so loved the world."))
+            )
         )
     )
 
@@ -54,7 +65,7 @@ class ProgressBackupSerializationTest {
         val backup = sampleBackup()
         val decoded = json.decodeFromString<ProgressBackup>(json.encodeToString(backup))
         assertEquals(backup, decoded)
-        assertEquals(1, decoded.version)
+        assertEquals(2, decoded.version)
     }
 
     @Test
@@ -64,6 +75,8 @@ class ProgressBackupSerializationTest {
         assertTrue(s.contains("\"activeChapter\""))
         assertTrue(s.contains("\"folderDocId\""))
         assertTrue(s.contains("\"rootTreeUri\""))
+        assertTrue(s.contains("\"textTranslations\""))
+        assertTrue(s.contains("\"For God so loved the world.\""))
     }
 
     @Test
@@ -79,6 +92,12 @@ class ProgressBackupSerializationTest {
         assertEquals(0, rl.manualOffset)
         assertEquals(null, rl.activeBook)
         assertEquals(0, rl.listColor)
+    }
+
+    @Test
+    fun `backup without version decodes as legacy v1`() {
+        val decoded = json.decodeFromString<ProgressBackup>("""{"readingLists":[]}""")
+        assertEquals(1, decoded.version)
     }
 
     @Test

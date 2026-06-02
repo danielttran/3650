@@ -46,8 +46,22 @@ internal fun activeSourceUsable(sources: List<SourceWithMappings>): Boolean {
     return active.source.sourceType == "TEXT" || active.mappings.isNotEmpty()
 }
 
+/** Remaps a backed-up source to restored translation IDs, dropping broken legacy TEXT sources. */
+internal fun remapRestoredSource(
+    source: AudioSourceEntity,
+    restoredTranslationIds: Map<Long, Long>
+): AudioSourceEntity? {
+    if (source.sourceType != "TEXT") return source.copy(sourceId = 0)
+    val restoredTranslationId = source.translationId?.let { restoredTranslationIds[it] } ?: return null
+    return source.copy(
+        sourceId = 0,
+        rootTreeUri = "text://$restoredTranslationId",
+        translationId = restoredTranslationId
+    )
+}
+
 // Current backup schema version. Checked on import to guard against stale backups.
-private const val BACKUP_VERSION_CURRENT = 1
+private const val BACKUP_VERSION_CURRENT = 2
 
 // Tolerant JSON config: ignore unknown keys (forward-compat) and coerce nulls on
 // non-null-with-default fields so partial/older backups still import cleanly.
@@ -207,6 +221,11 @@ class BibleRepository @Inject constructor(
 
     suspend fun resetStats() = dao.resetAllStats()
 
+    suspend fun upsertAudioMapping(mapping: BookMappingEntity) {
+        audioSourceDao.upsertMapping(mapping)
+        clearCache()
+    }
+
     // ---------------------------------------------------------------------------
     // Chapter resolution
     // ---------------------------------------------------------------------------
@@ -342,7 +361,18 @@ class BibleRepository @Inject constructor(
     suspend fun exportProgress(): String = withContext(Dispatchers.IO) {
         val lists = dao.getAllLists().map { ReadingListBackup(it.readingList, it.books) }
         val sources = audioSourceDao.getAllSources().map { AudioSourceBackup(it.source, it.mappings) }
-        val backup = ProgressBackup(readingLists = lists, audioSources = sources)
+        val translations = bibleTextDao.getTranslations().map { translation ->
+            TextTranslationBackup(
+                entity = translation,
+                chapters = bibleTextDao.getChaptersForTranslation(translation.translationId)
+            )
+        }
+        val backup = ProgressBackup(
+            version = BACKUP_VERSION_CURRENT,
+            readingLists = lists,
+            audioSources = sources,
+            textTranslations = translations
+        )
         BackupJson.encodeToString(backup)
     }
 
@@ -356,8 +386,8 @@ class BibleRepository @Inject constructor(
             null
         } ?: return@withContext false
 
-        // #14: Version guard — reject unknown future schemas
-        if (backup.version > BACKUP_VERSION_CURRENT) {
+        // #14: Version guard — reject malformed, obsolete, or unknown future schemas.
+        if (backup.version !in 1..BACKUP_VERSION_CURRENT) {
             android.util.Log.e("BibleRepo", "Unsupported backup version ${backup.version} (current: $BACKUP_VERSION_CURRENT)")
             return@withContext false
         }
@@ -365,6 +395,7 @@ class BibleRepository @Inject constructor(
         // Nullable list fields are guarded below so partial backups still import cleanly.
         val readingLists = backup.readingLists ?: emptyList()
         val audioSources = backup.audioSources ?: emptyList()
+        val textTranslations = backup.textTranslations ?: emptyList()
 
         try {
             database.withTransaction {
@@ -379,17 +410,40 @@ class BibleRepository @Inject constructor(
                     dao.insertBooks(books.map { it.copy(id = 0, listId = newId) })
                 }
 
-                // #3: Only replace audio sources if the backup actually includes them.
-                // An old/stripped backup with no sources must NOT wipe existing mappings.
+                // Only replace sources when the backup actually includes them. Legacy or
+                // stripped backups with no sources must not wipe a device's linked folders.
                 if (audioSources.isNotEmpty()) {
                     audioSourceDao.clearAllMappings()
                     audioSourceDao.clearAllSources()
+
+                    // v2 backups carry the text store. Keep existing translations for v1 imports,
+                    // but skip their unrestorable TEXT source pointers below rather than inserting
+                    // broken references to IDs that may not exist on this device.
+                    val restoredTranslationIds = mutableMapOf<Long, Long>()
+                    if (backup.version >= 2) {
+                        bibleTextDao.clearAllTranslations()
+                        textTranslations.forEach { tb ->
+                            val translation = tb?.entity ?: return@forEach
+                            val newTranslationId = bibleTextDao.insertTranslation(translation.copy(translationId = 0))
+                            restoredTranslationIds[translation.translationId] = newTranslationId
+                            val chapters = tb.chapters ?: emptyList()
+                            bibleTextDao.upsertChapters(
+                                chapters.map { it.copy(translationId = newTranslationId) }
+                            )
+                        }
+                    }
+
                     audioSources.forEach { sb ->
                         if (sb?.entity == null) return@forEach
-                        val source = sb.entity.copy(sourceId = 0)
+                        val source = remapRestoredSource(sb.entity, restoredTranslationIds) ?: return@forEach
                         val newId = audioSourceDao.insertSource(source)
                         val mappings = sb.mappings ?: emptyList()
                         audioSourceDao.upsertMappings(mappings.map { it.copy(sourceId = newId) })
+                    }
+                    // If a backed-up active TEXT source was skipped (for example from a v1
+                    // backup), keep the restored audio sources usable by selecting a fallback.
+                    if (audioSourceDao.getActiveSource() == null) {
+                        audioSourceDao.getFirstSource()?.let { audioSourceDao.setActive(it.sourceId) }
                     }
                 }
             }

@@ -10,6 +10,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import org.w3c.dom.Node
 import java.io.ByteArrayInputStream
+import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 
 /** One parsed, cleaned chapter ready to store. [book] is a canonical [BookNameNormalizer] name. */
@@ -187,10 +188,18 @@ object BibleTextImporter {
     // ---------------------------------------------------------------- XML helpers
 
     private fun parseXml(content: String): org.w3c.dom.Document? = runCatching {
+        // Reject doctypes before invoking the platform parser. Some Android XML parser
+        // implementations do not support every JAXP hardening flag below, but imported
+        // scripture must never be allowed to declare or expand external entities.
+        require(!content.contains("<!DOCTYPE", ignoreCase = true)) { "DOCTYPE is not allowed" }
         val factory = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = false
+            runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
             runCatching { setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false) }
             runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
+            runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
+            runCatching { setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "") }
+            runCatching { setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "") }
         }
         factory.newDocumentBuilder().parse(ByteArrayInputStream(content.toByteArray(Charsets.UTF_8)))
     }.getOrNull()

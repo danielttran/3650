@@ -1,7 +1,9 @@
 package com.Bible3650.www.data.text
 
 import android.content.Context
+import androidx.room.withTransaction
 import com.Bible3650.www.data.BibleRegistry
+import com.Bible3650.www.data.local.AppDatabase
 import com.Bible3650.www.data.local.BibleTextDao
 import com.Bible3650.www.data.local.BibleTextEntity
 import com.Bible3650.www.data.local.BibleTranslationEntity
@@ -37,6 +39,7 @@ data class CatalogEntry(
 class BibleTextDownloader @Inject constructor(
     private val http: HttpFetcher,
     private val textDao: BibleTextDao,
+    private val database: AppDatabase,
     @ApplicationContext private val context: Context
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -46,25 +49,36 @@ class BibleTextDownloader @Inject constructor(
         return json.decodeFromString(ListSerializer(CatalogEntry.serializer()), raw)
     }
 
-    /** Downloads + stores a translation; returns the new translationId. [onProgress] = (done, total). */
-    suspend fun download(entry: CatalogEntry, onProgress: (Int, Int) -> Unit = { _, _ -> }): Long {
+    /**
+     * Downloads + stores a translation and runs [afterStore] in the same short DB transaction.
+     * [onProgress] = (done, total). Fetching and parsing intentionally happen before the
+     * transaction so slow network requests never hold a Room write lock.
+     */
+    suspend fun download(
+        entry: CatalogEntry,
+        onProgress: (Int, Int) -> Unit = { _, _ -> },
+        afterStore: suspend (Long) -> Unit = {}
+    ): Long {
         val chapters = fetchChapters(entry, http, onProgress)
         if (chapters.isEmpty()) throw IOException("No chapters parsed for ${entry.id}")
-        val translationId = textDao.insertTranslation(
-            BibleTranslationEntity(
-                name = entry.name,
-                abbrev = entry.abbrev,
-                language = entry.language,
-                origin = "DOWNLOAD",
-                hasApocrypha = entry.hasApocrypha,
-                license = entry.license,
-                attribution = entry.attribution
+        return database.withTransaction {
+            val translationId = textDao.insertTranslation(
+                BibleTranslationEntity(
+                    name = entry.name,
+                    abbrev = entry.abbrev,
+                    language = entry.language,
+                    origin = "DOWNLOAD",
+                    hasApocrypha = entry.hasApocrypha,
+                    license = entry.license,
+                    attribution = entry.attribution
+                )
             )
-        )
-        chapters.chunked(CHAPTER_BATCH).forEach { batch ->
-            textDao.upsertChapters(batch.map { BibleTextEntity(translationId, it.book, it.chapter, it.text) })
+            chapters.chunked(CHAPTER_BATCH).forEach { batch ->
+                textDao.upsertChapters(batch.map { BibleTextEntity(translationId, it.book, it.chapter, it.text) })
+            }
+            afterStore(translationId)
+            translationId
         }
-        return translationId
     }
 
     companion object {
