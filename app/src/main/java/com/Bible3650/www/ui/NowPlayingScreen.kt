@@ -22,6 +22,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -119,6 +121,7 @@ fun NowPlayingScreen(
                 var dragValue by remember { mutableStateOf<Float?>(null) }
                 val maxValue = duration.coerceAtLeast(1L).toFloat()
                 val sliderValue = (dragValue ?: position.toFloat()).coerceIn(0f, maxValue)
+                val seekBarDesc = stringResource(R.string.seek_bar_desc)
                 Slider(
                     value = sliderValue,
                     onValueChange = { dragValue = it },
@@ -127,7 +130,8 @@ fun NowPlayingScreen(
                         dragValue = null
                     },
                     valueRange = 0f..maxValue,
-                    enabled = duration > 0
+                    enabled = duration > 0,
+                    modifier = Modifier.semantics { contentDescription = seekBarDesc }
                 )
                 Row(modifier = Modifier.fillMaxWidth()) {
                     Text(
@@ -186,16 +190,27 @@ fun NowPlayingScreen(
                 // and only commit to the player on release, avoiding a flood of writes.
                 var speedDrag by remember { mutableStateOf<Float?>(null) }
                 val shownSpeed = (speedDrag ?: speed).coerceIn(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED)
+                val resetSpeedDesc = stringResource(R.string.reset_speed)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.speed), style = MaterialTheme.typography.titleSmall)
                     Spacer(Modifier.weight(1f))
+                    // Tap the value to snap back to normal speed (1×) — a quick reset that
+                    // avoids dragging the slider precisely back to the centre.
                     Text(
                         "${trimSpeed(shownSpeed)}×",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .semantics { contentDescription = resetSpeedDesc }
+                            .clickable {
+                                speedDrag = null
+                                viewModel.setSpeed(1.0f)
+                            }
+                            .padding(4.dp)
                     )
                 }
+                val speedSliderDesc = stringResource(R.string.speed_slider_desc)
                 Slider(
                     value = shownSpeed,
                     onValueChange = { speedDrag = (it * SPEED_SNAP).roundToInt() / SPEED_SNAP },
@@ -203,7 +218,8 @@ fun NowPlayingScreen(
                         speedDrag?.let { viewModel.setSpeed(it) }
                         speedDrag = null
                     },
-                    valueRange = MIN_PLAYBACK_SPEED..MAX_PLAYBACK_SPEED
+                    valueRange = MIN_PLAYBACK_SPEED..MAX_PLAYBACK_SPEED,
+                    modifier = Modifier.semantics { contentDescription = speedSliderDesc }
                 )
 
                 Spacer(Modifier.height(16.dp))
