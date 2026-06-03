@@ -27,6 +27,9 @@
 
     <!-- Now Playing -->
     <string name="speed">Speed</string>
+    <string name="reset_speed">Reset speed to normal (1×)</string>
+    <string name="seek_bar_desc">Playback position</string>
+    <string name="speed_slider_desc">Playback speed</string>
     <string name="up_next">Up Next</string>
     <string name="audio_player">Audio Player</string>
     <string name="sleep_timer_off">Sleep timer: Off</string>

@@ -221,6 +221,11 @@ class AudioControllerManager @Inject constructor(
                     _currentMediaId.value = id
                     val dur = mediaController.duration
                     if (dur > 0) _duration.value = dur
+                    // Reflect the new item's position immediately. The 500ms updater only runs
+                    // while playing, so without this the seek bar would keep showing the previous
+                    // chapter's position when the user skips chapters while paused. Reading the
+                    // player's own position is correct for both a skip (0) and a restore (saved pos).
+                    _currentPosition.value = mediaController.currentPosition.coerceAtLeast(0L)
                     if (id != null) {
                         prefs.edit().putString(KEY_MEDIA_ID, id).putLong(KEY_POSITION, 0L).apply()
                     }
