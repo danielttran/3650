@@ -225,9 +225,15 @@ class AudioControllerManager @Inject constructor(
                     // while playing, so without this the seek bar would keep showing the previous
                     // chapter's position when the user skips chapters while paused. Reading the
                     // player's own position is correct for both a skip (0) and a restore (saved pos).
-                    _currentPosition.value = mediaController.currentPosition.coerceAtLeast(0L)
+                    val pos = mediaController.currentPosition.coerceAtLeast(0L)
+                    _currentPosition.value = pos
                     if (id != null) {
-                        prefs.edit().putString(KEY_MEDIA_ID, id).putLong(KEY_POSITION, 0L).apply()
+                        // Persist the player's ACTUAL position, not a hardcoded 0. On a chapter
+                        // skip/auto-transition this is ~0 (new chapter starts at the beginning),
+                        // but on a paused cold-start restore that seeks to the saved position this
+                        // is that position. Writing 0 here clobbered the saved resume point whenever
+                        // the app was reopened and closed again without pressing play.
+                        prefs.edit().putString(KEY_MEDIA_ID, id).putLong(KEY_POSITION, pos).apply()
                     }
                 }
 
@@ -348,6 +354,19 @@ class AudioControllerManager @Inject constructor(
                         if (player.mediaItemCount != tasks.size) return@withContext false
                         for (i in tasks.indices) {
                             if (player.getMediaItemAt(i).mediaId != tasks[i].uniqueId) return@withContext false
+                        }
+                        // The TEXT (TTS) build installs the playlist with not-yet-synthesized items
+                        // URI-less and fills them in asynchronously via prefetch. Reusing the playlist
+                        // to seek+play an item whose URI hasn't been resolved yet would play a
+                        // null-URI MediaItem and raise a playback error — and the requestId bump above
+                        // cancels the in-flight prefetch, so it would never recover. Fall through to a
+                        // full rebuild when the target item has no resolved URI so playTextTasks can
+                        // synthesize the requested chapter (AUDIO items are all resolved up front, so
+                        // this only triggers for a still-prefetching TTS item or a genuinely missing
+                        // file, both of which are handled correctly by the rebuild path).
+                        if (safeStartIndex != androidx.media3.common.C.INDEX_UNSET &&
+                            player.getMediaItemAt(safeStartIndex).localConfiguration == null) {
+                            return@withContext false
                         }
                         val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs else 0L
                         if (safeStartIndex != androidx.media3.common.C.INDEX_UNSET) player.seekTo(safeStartIndex, startPos)
