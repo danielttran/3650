@@ -443,7 +443,6 @@ class SourceManagerViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val snapshot = audioManager.currentPlaybackSnapshot()
-                audioManager.invalidatePendingPlaylistLoads()
                 val result = database.withTransaction {
                     val deleteResult = dao.deleteAndActivateFallback(source)
                     // For a text source, also remove the stored translation (cascades its text).
@@ -456,7 +455,14 @@ class SourceManagerViewModel @Inject constructor(
                 }
                 repository.clearCache()
                 refreshSourceHealth()
+                // Only disturb live playback when the ACTIVE source was deleted. Invalidating
+                // pending playlist loads unconditionally would cancel the active source's
+                // in-flight TTS prefetch when an unrelated, inactive source is removed, leaving
+                // the loaded playlist's later chapters URI-less (ExoPlayer would then error on
+                // auto-transition). stopPlayback()/resumeFromSnapshot() each invalidate on their
+                // own, so the explicit invalidate belongs inside this branch.
                 if (result.deletedActiveSource) {
+                    audioManager.invalidatePendingPlaylistLoads()
                     val fallback = result.fallbackSource
                     if (fallback == null) {
                         audioManager.stopPlayback()
