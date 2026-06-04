@@ -24,7 +24,10 @@
 -keep class com.Bible3650.www.data.ProgressBackup { *; }
 -keep class com.Bible3650.www.data.ReadingListBackup { *; }
 -keep class com.Bible3650.www.data.AudioSourceBackup { *; }
+-keep class com.Bible3650.www.data.TextTranslationBackup { *; }
 -keep class com.Bible3650.www.data.local.ReadingListEntity { *; }
 -keep class com.Bible3650.www.data.local.ListBookEntity { *; }
 -keep class com.Bible3650.www.data.local.AudioSourceEntity { *; }
 -keep class com.Bible3650.www.data.local.BookMappingEntity { *; }
+-keep class com.Bible3650.www.data.local.BibleTranslationEntity { *; }
+-keep class com.Bible3650.www.data.local.BibleTextEntity { *; }
