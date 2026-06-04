@@ -125,6 +125,15 @@ class AudioControllerManager @Inject constructor(
 
     private var positionUpdateJob: Job? = null
 
+    // mediaIds whose playback completion has already advanced their list for the CURRENTLY loaded
+    // playlist instance. Replaying an already-finished queue (togglePlayPause after STATE_ENDED, or
+    // the notification Play button — both do seekTo(0,0)+play on the same loaded items, never a
+    // rebuild) would otherwise fire AUTO_TRANSITION/STATE_ENDED again and advance the plan a second
+    // time, over-counting progress and skipping the next chapter. Cleared whenever a fresh playlist
+    // is installed. Accessed only on the main thread (Media3 listener callbacks + the main-dispatched
+    // setMediaItems/clearLoadedPlaylist paths), so a plain set is safe.
+    private val advancedMediaIds = mutableSetOf<String>()
+
     val savedMediaId: String? get() = prefs.getString(KEY_MEDIA_ID, null)
     val savedPosition: Long get() = prefs.getLong(KEY_POSITION, 0L)
 
@@ -252,19 +261,23 @@ class AudioControllerManager @Inject constructor(
                     reason: Int
                 ) {
                     if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
-                        oldPosition.mediaItem?.mediaId
-                            ?.substringBefore(TASK_ID_SEPARATOR)
-                            ?.toLongOrNull()
-                            ?.let { listId ->
-                                // Run in manager's own scope so this survives ViewModel destruction
-                                scope.launch {
-                                    try {
-                                        repository.advanceListDay(listId)
-                                    } catch (e: Exception) {
-                                        android.util.Log.e("AudioController", "Error advancing list day", e)
+                        val finishedId = oldPosition.mediaItem?.mediaId
+                        // Guard: only advance once per item per loaded playlist instance, so a
+                        // replay of an already-finished queue can't double-count.
+                        if (finishedId != null && advancedMediaIds.add(finishedId)) {
+                            finishedId.substringBefore(TASK_ID_SEPARATOR)
+                                .toLongOrNull()
+                                ?.let { listId ->
+                                    // Run in manager's own scope so this survives ViewModel destruction
+                                    scope.launch {
+                                        try {
+                                            repository.advanceListDay(listId)
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("AudioController", "Error advancing list day", e)
+                                        }
                                     }
                                 }
-                            }
+                        }
                         // Sleep timer: stop once the chapter that was playing has finished.
                         if (_sleepTimer.value is SleepTimer.EndOfChapter) {
                             mediaController.pause()
@@ -278,18 +291,22 @@ class AudioControllerManager @Inject constructor(
                 // list day gets advanced. Also clears saved position so the mini-player resets.
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_ENDED) {
-                        mediaController.currentMediaItem?.mediaId
-                            ?.substringBefore(TASK_ID_SEPARATOR)
-                            ?.toLongOrNull()
-                            ?.let { listId ->
-                                scope.launch {
-                                    try {
-                                        repository.advanceListDay(listId)
-                                    } catch (e: Exception) {
-                                        android.util.Log.e("AudioController", "Error advancing list day on STATE_ENDED", e)
+                        val endedId = mediaController.currentMediaItem?.mediaId
+                        // Guard: only advance once per item per loaded playlist instance, so
+                        // pressing play on an already-ended queue can't double-count.
+                        if (endedId != null && advancedMediaIds.add(endedId)) {
+                            endedId.substringBefore(TASK_ID_SEPARATOR)
+                                .toLongOrNull()
+                                ?.let { listId ->
+                                    scope.launch {
+                                        try {
+                                            repository.advanceListDay(listId)
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("AudioController", "Error advancing list day on STATE_ENDED", e)
+                                        }
                                     }
                                 }
-                            }
+                        }
                         prefs.edit().remove(KEY_MEDIA_ID).remove(KEY_POSITION).apply()
                         // Playback finished; disarm an end-of-chapter sleep timer.
                         if (_sleepTimer.value is SleepTimer.EndOfChapter) {
@@ -423,6 +440,8 @@ class AudioControllerManager @Inject constructor(
 
                     val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs
                                    else androidx.media3.common.C.TIME_UNSET
+                    // Fresh playlist instance: reset per-item advance tracking.
+                    advancedMediaIds.clear()
                     player.setMediaItems(allMediaItems, safeStartIndex, startPos)
                     player.prepare()
                     if (playWhenReady) player.play() else player.pause()
@@ -479,6 +498,8 @@ class AudioControllerManager @Inject constructor(
             if (!playlistRequests.isCurrent(requestId)) return@withContext
             val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs
                            else androidx.media3.common.C.TIME_UNSET
+            // Fresh playlist instance: reset per-item advance tracking.
+            advancedMediaIds.clear()
             player.setMediaItems(mediaItems, safeStartIndex, startPos)
             player.prepare()
             if (playWhenReady) player.play() else player.pause()
@@ -548,6 +569,7 @@ class AudioControllerManager @Inject constructor(
             player.clearMediaItems()
         }
         currentPlaylistSourceKey = null
+        advancedMediaIds.clear()
         _isPlaying.value = false
         _currentMediaId.value = null
         _currentPosition.value = 0L
