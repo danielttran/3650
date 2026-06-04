@@ -44,6 +44,10 @@ class TtsSynthesizer @Inject constructor(
     private val initMutex = Mutex()
     private val pending = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     private val utteranceCounter = AtomicInteger(0)
+    // Serializes synthesis of the SAME chapter (keyed by output file name). Two overlapping calls
+    // for one chapter (e.g. a prefetch racing a user tap, or a double-tap) otherwise write the same
+    // deterministic scratch/final paths and could cache a corrupt WAV or spuriously fail.
+    private val synthMutexes = ConcurrentHashMap<String, Mutex>()
 
     private val cacheDir: File by lazy { File(context.cacheDir, "tts").apply { mkdirs() } }
 
@@ -120,42 +124,50 @@ class TtsSynthesizer @Inject constructor(
             }
             lastFailureReason = null
             if (!ensureReady()) return@withContext null  // ensureReady set lastFailureReason
-            // Re-evaluate the name after init (voiceTag may have changed) and re-check cache.
+            // Re-evaluate the name after init (voiceTag may have changed).
             val finalFile = File(cacheDir, cacheFileName(translationId, book, chapter, voiceTag))
-            if (finalFile.isFile && finalFile.length() > WAV_HEADER) {
-                finalFile.setLastModified(System.currentTimeMillis())
-                return@withContext finalFile.toUri()
-            }
-            val text = textDao.getChapter(translationId, book, chapter)?.text?.takeIf { it.isNotBlank() }
-                ?: run {
-                    lastFailureReason = "This chapter has no stored text in this translation."
-                    return@withContext null
+            // Serialize concurrent synthesis of the SAME chapter: the scratch (.part/.tmp) and final
+            // paths are deterministic, so two overlapping calls (a prefetch racing a user tap for the
+            // same chapter, or a double-tap) would write identical files and could cache a corrupt
+            // WAV or spuriously fail. Mirror BibleRepository.resolveChapterFile's per-key mutex so the
+            // second caller reuses the first's result (re-checked inside the lock).
+            val mutex = synthMutexes.computeIfAbsent(finalFile.name) { Mutex() }
+            mutex.withLock {
+                if (finalFile.isFile && finalFile.length() > WAV_HEADER) {
+                    finalFile.setLastModified(System.currentTimeMillis())
+                    return@withLock finalFile.toUri()
                 }
-
-            _isSynthesizing.value = synthInFlight.incrementAndGet() > 0
-            try {
-                val chunks = chunkText(text, MAX_CHARS)
-                val tmp = File(cacheDir, finalFile.name + ".tmp")
-                val parts = ArrayList<File>(chunks.size)
-                for ((i, c) in chunks.withIndex()) {
-                    val part = File(cacheDir, finalFile.name + ".part$i")
-                    if (!synthToFile(c, part)) {
-                        parts.forEach { it.delete() }; part.delete(); return@withContext null
+                val text = textDao.getChapter(translationId, book, chapter)?.text?.takeIf { it.isNotBlank() }
+                    ?: run {
+                        lastFailureReason = "This chapter has no stored text in this translation."
+                        return@withLock null
                     }
-                    parts.add(part)
+
+                _isSynthesizing.value = synthInFlight.incrementAndGet() > 0
+                try {
+                    val chunks = chunkText(text, MAX_CHARS)
+                    val tmp = File(cacheDir, finalFile.name + ".tmp")
+                    val parts = ArrayList<File>(chunks.size)
+                    for ((i, c) in chunks.withIndex()) {
+                        val part = File(cacheDir, finalFile.name + ".part$i")
+                        if (!synthToFile(c, part)) {
+                            parts.forEach { it.delete() }; part.delete(); return@withLock null
+                        }
+                        parts.add(part)
+                    }
+                    val combined = if (parts.size == 1) {
+                        parts[0].copyTo(tmp, overwrite = true); true
+                    } else {
+                        concatWav(parts, tmp)
+                    }
+                    parts.forEach { it.delete() }
+                    if (!combined || !tmp.isFile || tmp.length() <= WAV_HEADER) { tmp.delete(); return@withLock null }
+                    tmp.renameTo(finalFile)
+                    evictIfOverCap()
+                    if (finalFile.isFile) finalFile.toUri() else null
+                } finally {
+                    _isSynthesizing.value = synthInFlight.decrementAndGet() > 0
                 }
-                val combined = if (parts.size == 1) {
-                    parts[0].copyTo(tmp, overwrite = true); true
-                } else {
-                    concatWav(parts, tmp)
-                }
-                parts.forEach { it.delete() }
-                if (!combined || !tmp.isFile || tmp.length() <= WAV_HEADER) { tmp.delete(); return@withContext null }
-                tmp.renameTo(finalFile)
-                evictIfOverCap()
-                if (finalFile.isFile) finalFile.toUri() else null
-            } finally {
-                _isSynthesizing.value = synthInFlight.decrementAndGet() > 0
             }
         }
     }

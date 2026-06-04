@@ -48,4 +48,30 @@ class NaturalFileSortTest {
         val sorted = docOrder(*names)
         assertEquals((1..150).map { "Psalm $it" }, sorted)
     }
+
+    @Test
+    fun `numeric tokens longer than Long do not overflow or tie`() {
+        // 20+ digit runs overflow Long.MAX_VALUE; ensure they still order by numeric value
+        // instead of collapsing to a single value and randomly tying.
+        assertTrue(NaturalFileSort.compareNames("file99999999999999999999", "file100000000000000000000") < 0)
+        assertTrue(NaturalFileSort.compareNames("file100000000000000000000", "file100000000000000000001") < 0)
+        val sorted = docOrder(
+            "track100000000000000000002.mp3",
+            "track100000000000000000010.mp3",
+            "track100000000000000000001.mp3"
+        )
+        assertEquals(
+            listOf(
+                "track100000000000000000001.mp3",
+                "track100000000000000000002.mp3",
+                "track100000000000000000010.mp3"
+            ),
+            sorted
+        )
+    }
+
+    @Test
+    fun `leading zeros do not change numeric ordering for large tokens`() {
+        assertTrue(NaturalFileSort.compareNames("x0009999999999999999999", "x9999999999999999999999") < 0)
+    }
 }

@@ -26,9 +26,15 @@ object NaturalFileSort {
         for (i in 0 until minOf(aToks.size, bToks.size)) {
             val (aNum, aStr) = aToks[i]; val (bNum, bStr) = bToks[i]
             val cmp = if (aNum && bNum) {
-                val aLong = aStr.toLongOrNull() ?: Long.MAX_VALUE
-                val bLong = bStr.toLongOrNull() ?: Long.MAX_VALUE
-                aLong.compareTo(bLong)
+                // Compare digit strings by numeric value WITHOUT parsing to Long: a token with
+                // more than ~18 digits overflows toLong() and would otherwise collapse to a
+                // single value, tying (and randomly ordering) every long-numbered file. Strip
+                // leading zeros, then the longer significant-digit run is the larger number;
+                // equal lengths compare lexicographically (digits sort in value order).
+                val aDigits = aStr.trimStart('0')
+                val bDigits = bStr.trimStart('0')
+                if (aDigits.length != bDigits.length) aDigits.length.compareTo(bDigits.length)
+                else aDigits.compareTo(bDigits)
             } else {
                 aStr.compareTo(bStr, ignoreCase = true)
             }

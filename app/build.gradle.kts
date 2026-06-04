@@ -50,8 +50,14 @@ android {
             // stripped via the rule in proguard-rules.pro. This also shrinks the APK.
             isMinifyEnabled = true
 
-            // For testing the release build on a device, we sign it with the debug key.
-            signingConfig = signingConfigs.getByName("debug")
+            // Use the real release key when its credentials are configured (CI/release builds
+            // set RELEASE_STORE_FILE etc., so storeFile is non-null). Otherwise fall back to the
+            // debug key so local/CI builds without those credentials stay installable/testable.
+            // Without this branch the release signingConfig was dead config and every release
+            // artifact — even a real one with credentials present — was signed with the debug key.
+            val releaseSigning = signingConfigs.getByName("release")
+            signingConfig = if (releaseSigning.storeFile != null) releaseSigning
+                            else signingConfigs.getByName("debug")
 
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
