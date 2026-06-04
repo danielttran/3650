@@ -455,6 +455,13 @@ class SourceManagerViewModel @Inject constructor(
                 }
                 repository.clearCache()
                 refreshSourceHealth()
+                // Purge the deleted translation's synthesized TTS audio so its WAVs don't linger
+                // in the cache until LRU eviction at the 250 MB cap.
+                if (source.sourceType == "TEXT") {
+                    source.translationId?.let { tid ->
+                        withContext(Dispatchers.IO) { audioManager.clearTtsCacheForTranslation(tid) }
+                    }
+                }
                 // Only disturb live playback when the ACTIVE source was deleted. Invalidating
                 // pending playlist loads unconditionally would cancel the active source's
                 // in-flight TTS prefetch when an unrelated, inactive source is removed, leaving

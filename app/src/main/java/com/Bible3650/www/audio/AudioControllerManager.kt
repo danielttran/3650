@@ -562,6 +562,10 @@ class AudioControllerManager @Inject constructor(
         prefs.edit().remove(KEY_MEDIA_ID).remove(KEY_POSITION).apply()
     }
 
+    /** Purges cached TTS audio for a deleted translation so its WAVs don't linger in the cache. */
+    fun clearTtsCacheForTranslation(translationId: Long) =
+        ttsSynthesizer.clearCacheForTranslation(translationId)
+
     fun togglePlayPause() {
         val player = _player.value ?: return
         if (player.playbackState == Player.STATE_ENDED) {
