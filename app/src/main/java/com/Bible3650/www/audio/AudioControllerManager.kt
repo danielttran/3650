@@ -162,6 +162,11 @@ class AudioControllerManager @Inject constructor(
     private fun savePosition(p: Player) {
         positionUpdateJob?.cancel()
         positionUpdateJob = null
+        // When the playlist has ended, onPlaybackStateChanged(STATE_ENDED) already cleared the
+        // saved media id/position. onIsPlayingChanged(false) also fires on end, so don't resurrect
+        // them here: persisting the finished chapter's end position would restore a completed
+        // chapter (paused at its end) on the next cold start instead of a cleared mini-player.
+        if (p.playbackState == Player.STATE_ENDED) return
         val pos = p.currentPosition
         val id = p.currentMediaItem?.mediaId
         val editor = prefs.edit()
