@@ -390,6 +390,15 @@ class AudioControllerManager @Inject constructor(
                             player.getMediaItemAt(safeStartIndex).localConfiguration == null) {
                             return@withContext false
                         }
+                        // A playTasks call is a deliberate (re)start request, so reset the advance
+                        // de-dup tracking here too. Without this, a list whose total is a single
+                        // chapter (stable uniqueId across advance) would reuse the playlist and the
+                        // sticky guard would suppress its advance on an explicit second play. Safe
+                        // because the reuse only seeks FORWARD from safeStartIndex, so no
+                        // already-advanced item replays (no double-advance). The accidental
+                        // ended-queue replay path is togglePlayPause, which does not call playTasks
+                        // and stays correctly de-duplicated.
+                        advancedMediaIds.clear()
                         val startPos = if (startPositionMs != androidx.media3.common.C.TIME_UNSET) startPositionMs else 0L
                         if (safeStartIndex != androidx.media3.common.C.INDEX_UNSET) player.seekTo(safeStartIndex, startPos)
                         if (playWhenReady) player.play() else player.pause()
