@@ -29,6 +29,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 import androidx.room.withTransaction
@@ -98,6 +99,12 @@ class BibleRepository @Inject constructor(
     // compare-and-set atomicity, so TOCTOU is possible under concurrent callers).
     private val frozenOnce = AtomicBoolean(false)
 
+    // Bumped whenever the URI caches are cleared (source switch, restore, reset-to-defaults).
+    // A background URI resolution captures this before it starts and discards its write-back if
+    // the generation changed meanwhile, so a resolution for a now-inactive source cannot
+    // re-insert stale (source-agnostic) URIs into resolvedUris after clearCache() emptied it.
+    private val cacheGeneration = AtomicLong(0)
+
     /**
      * Emits true when the active source is usable: a TEXT (TTS) source — which has a stored
      * translation rather than folder mappings — or an AUDIO source with at least one book
@@ -139,6 +146,7 @@ class BibleRepository @Inject constructor(
     }
 
     fun clearCache() {
+        cacheGeneration.incrementAndGet()
         folderCache.evictAll()
         cacheMutexes.clear()
         resolvedUris.value = emptyMap()
@@ -158,12 +166,18 @@ class BibleRepository @Inject constructor(
         // emission, creating an infinite background-fetch loop that drains the battery.
         val missing = tasks.filter { !uris.containsKey(it.uniqueId) && resolvingTasks.add(it.uniqueId) }
         if (missing.isNotEmpty()) {
+            val gen = cacheGeneration.get()
             repositoryScope.launch {
                 try {
                     val newUris = missing.associate { task ->
                         task.uniqueId to getTaskFileUri(task.targetBook, task.targetChapter)
                     }
-                    resolvedUris.update { it + newUris }
+                    // Discard if a source switch / cache clear happened while we were resolving:
+                    // the uniqueId keys are source-agnostic, so applying now would re-insert URIs
+                    // for the previous source that clearCache() just removed.
+                    if (cacheGeneration.get() == gen) {
+                        resolvedUris.update { it + newUris }
+                    }
                 } finally {
                     // Always remove from in-flight set so a failure doesn't permanently
                     // block re-resolution for these tasks on the next emission.
@@ -470,10 +484,10 @@ class BibleRepository @Inject constructor(
                 dao.createCustomList(ReadingListEntity(listName = name, listOrder = index, listColor = 0), books)
             }
         }
-        // Reset caches only after the transaction is committed
-        resolvedUris.value = emptyMap()
-        resolvingTasks.clear()
-        folderCache.evictAll()
+        // Reset caches only after the transaction is committed. clearCache() also bumps the
+        // cache generation so any in-flight resolution from the old lists is discarded rather
+        // than re-inserted under a now-stale uniqueId.
+        clearCache()
         // Allow freezeActiveTasks to re-freeze the new lists on next launch
         frozenOnce.set(false)
     }
